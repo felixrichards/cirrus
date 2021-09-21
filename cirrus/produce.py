@@ -3,11 +3,13 @@ import os
 import sys
 import torch
 from PIL import Image
-from igcn.utils import _pair
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import ast
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from igcn.seg.models import UNetIGCNCmplx
+from igcn.utils import _pair
 from run_cirrus import create_model
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data import CirrusDataset
@@ -123,6 +125,8 @@ def parse_filename(filename):
         params['relu_type'] = filename[relu_i:filename.index('_', relu_i)]
 
     params['name'] = os.path.split(filename)[-1]
+    params['upsample_mode'] = 'bilinear'
+    params['dropout'] = 0
 
     return params
 
@@ -167,22 +171,23 @@ def produce_output(
     downscale=1,
     n_channels=1,
     n_classes=1,
-    padding=16,
+    padding=0,
     batch_size=1,
     device='cpu',
     galaxy='NGC3230',
     overlap=16,
-    pmap=False
+    pmap=False,
+    crop_size=256
 ):
     image, _ = dataset.get_galaxy(galaxy)
 
     original_shape = image[0].numpy().shape
-    crop_size = (256, 256)
-    padding = 16
+    crop_size = (crop_size, crop_size)
     batches = dissect(image.numpy(), size=crop_size, overlap=overlap, downscale=downscale)
     del(image)
     batches = batches.float()
     batches = batches.view(-1, batch_size, n_channels, *crop_size)
+    print(f'{batches.size()=}')
     batches_out = torch.zeros(batches.size(0), batch_size, n_classes, *crop_size)
 
     # out1 = stitch(batches[:, 0].numpy(), original_shape, overlap=overlap, downscale=downscale)
@@ -199,6 +204,7 @@ def produce_output(
         for i, batch in enumerate(batches):
             print(f'{i}/{len(batches)}')
             padded_batch = pad(batch, padding)
+            print(f'{padded_batch.size()=}')
             batch_out = model(padded_batch.to(device))
             batch_out = batch_out.squeeze(1)[..., padding:batch_out.size(-2)-padding, padding:batch_out.size(-1)-padding]
             batch_out = torch.clamp(batch_out, 0, 1)
@@ -224,7 +230,7 @@ def produce_output(
 
 def save_array_png(t, filepath, norm=False):
     if norm:
-        t = norm(t)
+        t = normalise(t)
     t = (t * 255).astype('uint8')
     t = np.pad(t, 2, mode='constant')
     t = Image.fromarray(t)
@@ -257,19 +263,22 @@ def save_outs(outs, labels, save_dir, params, galaxy, overlap=16, pmap=True):
         save_array_png(t, os.path.join(save_dir, sub_dir_name, image_name))
 
 
+def normalise(t):
+    return (t - t.min()) / (t.max() - t.min())
+
+
 def create_png_copies(dataset, save_dir, galaxy, labels, scale=None):
-    def norm(t):
-        return (t - t.min()) / (t.max() - t.min())
     print(galaxy)
+    print(dataset.galaxies)
     image, target = dataset.get_galaxy(galaxy)
     gal_save_dir = os.path.join(save_dir, 'copies', 'galaxies')
     if scale is not None:
         # gal_save_dir = os.path.join(gal_save_dir, 'scale')
         with torch.no_grad():
-            image = scale(image).squeeze(0)
-
+            image = scale(image.unsqueeze(0)).squeeze(0)
     bands = dataset.bands
     for i, band in enumerate(bands):
+        print(image[i].min(), image[i].max())
         save_array_png(
             image[i].numpy(),
             os.path.join(gal_save_dir, f'{galaxy}-{band}-scale={scale is not None}.png'),
@@ -305,6 +314,10 @@ def main():
                         default=16, type=int,
                         help='Tile overlap. '
                              '(default: %(default)s)')
+    parser.add_argument('--crop_size',
+                        default=256, type=int,
+                        help='Input size for network. '
+                             '(default: %(default)s)')
     parser.add_argument('--galaxy',
                         default='NGC3230', type=str,
                         help='Galaxy name.')
@@ -339,13 +352,14 @@ def main():
 
     if args.copies:
         if args.scale:
-            scale = model.preprocess
+            scale = model.preprocess.scale
         else:
             scale = None
         create_png_copies(dataset, args.save_dir, args.galaxy, labels, scale=scale)#model.preprocess)
         return
 
     model = model.cuda()
+    model = model.eval()
     outs = produce_output(
         model,
         dataset,
@@ -355,7 +369,8 @@ def main():
         device='cuda:0',
         galaxy=args.galaxy,
         overlap=args.overlap,
-        pmap=args.pmap
+        pmap=args.pmap,
+        crop_size=args.crop_size
     )
     print(args.save_dir)
     save_outs(outs, labels, args.save_dir, params, args.galaxy, args.overlap, args.pmap)

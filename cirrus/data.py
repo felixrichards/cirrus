@@ -53,8 +53,11 @@ class CirrusDataset(Dataset):
         # 'i': .246,
         # 'gr': .276,
         # reprocessed cirrus
-        'g': 0.288,
-        'r': 0.207,
+        # 'g': 0.288,
+        # 'r': 0.207,
+        # processed cirrus+HB
+        'g': .265,
+        'r': .313,
     }
     stds = {
         # processed cirrus+HB
@@ -66,8 +69,11 @@ class CirrusDataset(Dataset):
         # 'i': 1.063,
         # 'gr': .744,
         # reprocessed cirrus
-        'g': 0.712,
-        'r': 0.795,
+        # 'g': 0.712,
+        # 'r': 0.795,
+        # processed cirrus+HB
+        'g': .753,
+        'r': .918,
     }
 
     def __init__(self, survey_dir, mask_dir, indices=None, num_classes=1,
@@ -156,9 +162,9 @@ class CirrusDataset(Dataset):
         if self.padding > 0:
             mask = remove_padding(mask, self.padding)
         return (
-            cirrus,
+            # cirrus,
+            self.norm_transform(cirrus),
             mask
-            # self.norm_transform(transforms.ToTensor()(cirrus)),
         )
 
     def __len__(self):
