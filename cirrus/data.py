@@ -126,37 +126,16 @@ class CirrusDataset(Dataset):
     def __init__(self, survey_dir, mask_dir, indices=None, num_classes=1,
                  transform=None, target_transform=None, crop_deg=.5,
                  aug_mult=2, bands='g', repeat_bands=False, padding=0,
-                 class_map=None):
-        self.all_mask_paths = [
-            array for array in glob.glob(os.path.join(mask_dir, '*.npz'))
-        ]
-
+                 class_map=None, keep_background=False):
         if type(bands) is str:
             bands = [bands]
 
-        self.galaxies = []
-        self.cirrus_paths = []
-        self.mask_paths = []
-        for i, mask_path in enumerate(self.all_mask_paths):
-            mask_args = self.decode_filename(mask_path)
-            galaxy = mask_args['name']
-            fits_dirs = [os.path.join(
-                survey_dir,
-                galaxy,
-                band
-            ) for band in bands]
-            valid_fits_paths = [os.path.isdir(path) for path in fits_dirs]
-            fits_paths = []
-            if all(valid_fits_paths):
-                fits_paths = [glob.glob(path + '/*.fits')[0] for path in fits_dirs]
-            elif any(valid_fits_paths) and repeat_bands:
-                for path, valid in zip(fits_dirs, valid_fits_paths):
-                    if valid:
-                        fits_paths.append(glob.glob(path + '/*.fits')[0])
-            if fits_paths:
-                self.galaxies.append(galaxy)
-                self.cirrus_paths.append(fits_paths)
-                self.mask_paths.append(mask_path)
+        self.galaxies, self.cirrus_paths, self.mask_paths = self.load_data(
+            survey_dir,
+            mask_dir,
+            bands,
+            repeat_bands
+        )
 
         self.bands = bands
         self.num_channels = len(bands)
@@ -173,6 +152,7 @@ class CirrusDataset(Dataset):
             self.mask_paths = [self.mask_paths[i] for i in indices]
 
         self.padding = padding
+        self.keep_background = keep_background
         if type(class_map) is str:
             self.num_classes = len(self.class_maps[class_map]['classes'])
             self.class_map = self.class_maps[class_map]['idxs']
@@ -188,7 +168,8 @@ class CirrusDataset(Dataset):
         # if not (mask.shape[0] == self.num_classes or mask.shape[-1] == self.num_classes):
         #     raise ValueError(f'Mask {mask.shape} does not match number of channels ({self.num_classes})')
 
-        mask = combine_classes(mask, self.class_map)
+        if self.class_map is not None:
+            mask = combine_classes(mask, self.class_map, self.keep_background)
         mask = mask[:self.num_classes]
 
         if self.crop_deg is not None:
@@ -267,6 +248,42 @@ class CirrusDataset(Dataset):
         mask = mask[:np.prod(shape)]
         return mask.reshape(shape), centre
 
+    @classmethod
+    def load_data(cls, survey_dir, mask_dir, bands, repeat_bands):
+        all_mask_paths = [
+            array for array in glob.glob(os.path.join(mask_dir, '*.npz'))
+        ]
+        galaxies = []
+        cirrus_paths = []
+        mask_paths = []
+        for i, mask_path in enumerate(all_mask_paths):
+            mask_args = cls.decode_filename(mask_path)
+            galaxy = mask_args['name']
+            fits_dirs = [os.path.join(
+                survey_dir,
+                galaxy,
+                band
+            ) for band in bands]
+            valid_fits_paths = [os.path.isdir(path) for path in fits_dirs]
+            fits_paths = []
+            if all(valid_fits_paths):
+                fits_paths = [glob.glob(path + '/*.fits')[0] for path in fits_dirs]
+            elif any(valid_fits_paths) and repeat_bands:
+                for path, valid in zip(fits_dirs, valid_fits_paths):
+                    if valid:
+                        fits_paths.append(glob.glob(path + '/*.fits')[0])
+            if fits_paths:
+                galaxies.append(galaxy)
+                cirrus_paths.append(fits_paths)
+                mask_paths.append(mask_path)
+
+        return galaxies, cirrus_paths, mask_paths
+
+    @classmethod
+    def get_N(cls, survey_dir, mask_dir, bands, repeat_bands=False):
+        galaxies, _, _ = cls.load_data(survey_dir, mask_dir, bands, repeat_bands)
+        return len(galaxies)
+
 
 class SynthCirrusDataset(Dataset):
     """Loads cirrus dataset from file.
@@ -329,7 +346,7 @@ def remove_padding(t, p):
     return t[..., p//2:-p//2, p//2:-p//2]
 
 
-def combine_classes(mask, class_map, remove_background=True):
+def combine_classes(mask, class_map, keep_background=True):
     """Combines classes into groups of classes based on given class map
 
     Args:
@@ -340,6 +357,6 @@ def combine_classes(mask, class_map, remove_background=True):
     out = np.zeros((n_classes + 1, *mask.shape[-2:]), dtype=np.int)
     for i in range(mask.shape[0]):
         out[class_map[i], mask[i] == 1] = 1
-    if remove_background:
+    if not keep_background:
         out = out[1:]
     return out
