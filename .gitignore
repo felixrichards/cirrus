@@ -1,3 +1,4 @@
 *.pyc
 cirrus/__pycache__/
 cirrus.egg-info
+.vscode/

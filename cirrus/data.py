@@ -76,9 +76,57 @@ class CirrusDataset(Dataset):
         'r': .918,
     }
 
+    class_maps = {
+        'contaminants': {
+            'idxs': [
+                0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0,
+                0, 1, 2, 3, 0
+            ],
+            'classes': [
+                'None', 'High background', 'Ghosted halo', 'Cirrus'
+            ]
+        },
+        'basic': {
+            'idxs': [
+                0, 2, 2, 2, 2,
+                1, 1, 1, 1, 0,
+                0, 0, 0, 0, 0,
+                0, 3, 3, 3, 0
+            ],
+            'classes': [
+                'None', 'Galaxy', 'Fine structures', 'Contaminants'
+            ]
+        },
+        'streamstails': {
+            'idxs': [
+                0, 0, 0, 1, 2,
+                0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0
+            ],
+            'classes': [
+                'None', 'Tidal tails', 'Streams'
+            ]
+        },
+        'all': {
+            'idxs': [
+                0, 5, 0, 3, 4,
+                1, 0, 6, 0, 2,
+                0, 0, 0, 0, 0,
+                0, 9, 7, 8, 0
+            ],
+            'classes': [
+                'None', 'Main galaxy', 'Halo', 'Tidal tails', 'Streams', 'Shells', 'Companion', 'Ghosted halo', 'Cirrus', 'High background'
+            ]
+        },
+    }
+
     def __init__(self, survey_dir, mask_dir, indices=None, num_classes=1,
                  transform=None, target_transform=None, crop_deg=.5,
-                 aug_mult=2, bands='g', repeat_bands=False, padding=0):
+                 aug_mult=2, bands='g', repeat_bands=False, padding=0,
+                 class_map=None):
         self.all_mask_paths = [
             array for array in glob.glob(os.path.join(mask_dir, '*.npz'))
         ]
@@ -110,7 +158,6 @@ class CirrusDataset(Dataset):
                 self.cirrus_paths.append(fits_paths)
                 self.mask_paths.append(mask_path)
 
-        self.num_classes = num_classes
         self.bands = bands
         self.num_channels = len(bands)
         self.transform = transform
@@ -126,6 +173,12 @@ class CirrusDataset(Dataset):
             self.mask_paths = [self.mask_paths[i] for i in indices]
 
         self.padding = padding
+        if type(class_map) is str:
+            self.num_classes = len(self.class_maps[class_map]['classes'])
+            self.class_map = self.class_maps[class_map]['idxs']
+        else:
+            self.num_classes = num_classes
+            self.class_map = class_map
 
     def __getitem__(self, i):
         i = i // self.aug_mult
@@ -135,6 +188,7 @@ class CirrusDataset(Dataset):
         # if not (mask.shape[0] == self.num_classes or mask.shape[-1] == self.num_classes):
         #     raise ValueError(f'Mask {mask.shape} does not match number of channels ({self.num_classes})')
 
+        mask = combine_classes(mask, self.class_map)
         mask = mask[:self.num_classes]
 
         if self.crop_deg is not None:
@@ -147,7 +201,7 @@ class CirrusDataset(Dataset):
         cirrus = cirrus.transpose((1, 2, 0))
         cirrus = cirrus.astype('float32')
         # mask = mask.reshape(mask.shape[-2], mask.shape[-1], -1)
-        mask = mask.transpose((1, 2, 0))
+        # mask = mask.transpose((1, 2, 0))
         mask = mask.astype('float32')
 
         if self.transform is not None:
@@ -273,3 +327,19 @@ class SynthCirrusDataset(Dataset):
 
 def remove_padding(t, p):
     return t[..., p//2:-p//2, p//2:-p//2]
+
+
+def combine_classes(mask, class_map, remove_background=True):
+    """Combines classes into groups of classes based on given class map
+
+    Args:
+        mask (np.array): Input mask.
+        class_map (list): The label each class should be mapped to.
+    """
+    n_classes = max(class_map)
+    out = np.zeros((n_classes + 1, *mask.shape[-2:]), dtype=np.int)
+    for i in range(mask.shape[0]):
+        out[class_map[i], mask[i] == 1] = 1
+    if remove_background:
+        out = out[1:]
+    return out
