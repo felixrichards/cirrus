@@ -155,7 +155,10 @@ class CirrusDataset(Dataset):
         self.keep_background = keep_background
         if type(class_map) is str:
             self.classes = self.class_maps[class_map]['classes']
-            self.num_classes = len(self.classes) - 1
+            if self.keep_background:
+                self.num_classes = len(self.classes)
+            else:
+                self.num_classes = len(self.classes) - 1
             self.class_map = self.class_maps[class_map]['idxs']
         else:
             self.classes = None
