@@ -231,6 +231,16 @@ class CirrusDataset(Dataset):
             return None
         return self[index * self.aug_mult]
 
+
+    def plot_galaxy(self, galaxy):
+        fig, ax = plt.subplots(1, len(dataset.classes[1:]) + 1)
+        ax[0].imshow(item[0][0])
+        ax[0].set_title(galaxy)
+        for i, class_ in enumerate(dataset.classes[1:]):
+            ax[i + 1].imshow(item[1][i], vmin=0, vmax=1)
+            ax[i + 1].set_title(class_)
+        plt.show()
+
     @classmethod
     def decode_filename(cls, path):
         def check_list(item):
