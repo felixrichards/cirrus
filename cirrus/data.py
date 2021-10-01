@@ -126,7 +126,7 @@ class CirrusDataset(Dataset):
     def __init__(self, survey_dir, mask_dir, indices=None, num_classes=1,
                  transform=None, target_transform=None, crop_deg=.5,
                  aug_mult=2, bands='g', repeat_bands=False, padding=0,
-                 class_map=None, keep_background=False):
+                 class_map=None, keep_background=False, classes=None):
         if type(bands) is str:
             bands = [bands]
 
@@ -154,9 +154,11 @@ class CirrusDataset(Dataset):
         self.padding = padding
         self.keep_background = keep_background
         if type(class_map) is str:
-            self.num_classes = len(self.class_maps[class_map]['classes'])
+            self.classes = self.class_maps[class_map]['classes']
+            self.num_classes = len(self.classes)
             self.class_map = self.class_maps[class_map]['idxs']
         else:
+            self.classes = None
             self.num_classes = num_classes
             self.class_map = class_map
 
@@ -182,7 +184,7 @@ class CirrusDataset(Dataset):
         cirrus = cirrus.transpose((1, 2, 0))
         cirrus = cirrus.astype('float32')
         # mask = mask.reshape(mask.shape[-2], mask.shape[-1], -1)
-        # mask = mask.transpose((1, 2, 0))
+        mask = mask.transpose((1, 2, 0))
         mask = mask.astype('float32')
 
         if self.transform is not None:
@@ -354,7 +356,7 @@ def combine_classes(mask, class_map, keep_background=True):
         class_map (list): The label each class should be mapped to.
     """
     n_classes = max(class_map)
-    out = np.zeros((n_classes + 1, *mask.shape[-2:]), dtype=np.int)
+    out = np.zeros((n_classes + 1, *mask.shape[-2:]), dtype=int)
     for i in range(mask.shape[0]):
         out[class_map[i], mask[i] == 1] = 1
     if not keep_background:
