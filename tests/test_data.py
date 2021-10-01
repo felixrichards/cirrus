@@ -4,22 +4,31 @@ import matplotlib.pyplot as plt
 
 
 def test_combine_classes():
-    class_map = CirrusDataset.class_maps['contaminants']['idxs']
     mask = np.zeros((20, 5, 5), dtype=int)
     mask[2] = 1
     mask[3] = 1
-    mask[5] = 1
+    mask[5, 2, 1] = 1
+    mask[6, 2, 1] = 1
+    mask[6, 2, 2] = 1
     mask[16] = 1
     mask[17, 1, 2] = 1
     mask[18] = 1
-    out_background = combine_classes(mask, class_map, True)
-    out = combine_classes(mask, class_map, False)
+    contaminant_map = CirrusDataset.class_maps['contaminants']['idxs']
+    out = combine_classes(mask, contaminant_map)
     
     test = np.ones((4, 5, 5), dtype=int)
     test[2] = 0
     test[2, 1, 2] = 1
-    assert np.array_equal(out_background, test), "Failed with remove_background=False"
-    assert np.array_equal(out, test[1:]), "Failed with remove_background=True"
+    assert np.array_equal(out, test[1:]), "Failed with remove_background=True, class_map=contaminants"
+    
+    basic_map = CirrusDataset.class_maps['basic']['idxs']
+    out = combine_classes(mask, basic_map)
+    test = np.ones((4, 5, 5), dtype=int)
+    test[1] = 0
+    test[1, 2, 1] = 1
+    test[1, 2, 2] = 1
+    assert np.array_equal(out, test[1:]), "Failed with remove_background=True, class_map=basic"
+    # assert np.array_equal(out_background, test), "Failed with remove_background=False"
 
 
 def test_load(setup_func):
