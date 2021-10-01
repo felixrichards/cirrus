@@ -11,10 +11,10 @@ def test_combine_classes():
     mask[16] = 1
     mask[17, 1, 2] = 1
     mask[18] = 1
-    out_background = combine_classes(mask, class_map, False)
-    out = combine_classes(mask, class_map, True)
+    out_background = combine_classes(mask, class_map, True)
+    out = combine_classes(mask, class_map, False)
     
-    test = np.ones((4, 5, 5))
+    test = np.ones((4, 5, 5), dtype=np.int)
     test[2] = 0
     test[2, 1, 2] = 1
     assert np.array_equal(out_background, test), "Failed with remove_background=False"
