@@ -19,6 +19,7 @@ class ScaleBase(nn.Module):
     }
 
     def __init__(self, n_channels, method='arcsinh'):
+        super().__init__()
         self.n_channels = n_channels
         self.band_order = ['g', 'r']
 
