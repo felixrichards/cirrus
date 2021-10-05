@@ -173,15 +173,15 @@ class CirrusDataset(Dataset):
         # if not (mask.shape[0] == self.num_classes or mask.shape[-1] == self.num_classes):
         #     raise ValueError(f'Mask {mask.shape} does not match number of channels ({self.num_classes})')
 
-        if self.class_map is not None:
-            mask = combine_classes(mask, self.class_map, self.keep_background)
-        mask = mask[:self.num_classes]
-
         if self.crop_deg is not None:
             cirrus = np.array([self.crop(ci.data, wcs, centre) for ci in cirrus])
             mask = self.crop(mask, wcs, centre)
         else:
             cirrus = np.array([ci.data for ci in cirrus])
+
+        if self.class_map is not None:
+            mask = combine_classes(mask, self.class_map, self.keep_background)
+        mask = mask[:self.num_classes]
 
         # cirrus = cirrus.reshape(cirrus.shape[-2], cirrus.shape[-1], -1)
         cirrus = cirrus.transpose((1, 2, 0))
