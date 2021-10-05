@@ -360,17 +360,21 @@ def remove_padding(t, p):
     return t[..., p//2:-p//2, p//2:-p//2]
 
 
-def combine_classes(mask, class_map, keep_background=True):
+def combine_classes(mask, class_map, keep_background=False):
     """Combines classes into groups of classes based on given class map
 
     Args:
         mask (np.array): Input mask.
         class_map (list): The label each class should be mapped to.
     """
+    if keep_background:
+        raise NotImplementedError("Make background class not(intersection(other_classes)) for CE")
     n_classes = max(class_map)
-    out = np.zeros((n_classes + 1, *mask.shape[-2:]), dtype=int)
-    for i in range(mask.shape[0]):
-        out[class_map[i], mask[i] == 1] = 1
+    out = torch.zeros((n_classes + 1, *mask.shape[-2:]), dtype=int)
+    class_map = torch.tensor(class_map, dtype=torch.int64)
+    mask = torch.tensor(mask, dtype=int)
+    idxs = class_map.view(-1, 1, 1).expand_as(mask) * mask
+    out.scatter_(0, idxs, mask)
     if not keep_background:
         out = out[1:]
-    return out
+    return np.array(out)
