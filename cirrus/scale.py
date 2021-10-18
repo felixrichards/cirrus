@@ -55,7 +55,7 @@ class Scale(ScaleBase):
         xs = x.size()
         x = x.unsqueeze(1)
         x = self.scale(x)
-        x = x.view(xs[0], self.out_channels, xs[2], xs[3])
+        x = x.view(xs[0], -1, xs[2], xs[3])
         return x
 
 
