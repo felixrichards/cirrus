@@ -1,17 +1,21 @@
+import argparse
 import ast
 import glob
 import os
+import warnings
 
 import numpy as np
 import PIL.Image as Image
 import torch
+import matplotlib.pyplot as plt
+import cv2
 
 from torchvision import transforms
 from torch.utils.data.dataset import Dataset
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.utils.exceptions import AstropyWarning
-import warnings
+from torch_scatter import scatter_max
 
 warnings.simplefilter('ignore', category=AstropyWarning)
 
@@ -79,7 +83,7 @@ class CirrusDataset(Dataset):
     class_maps = {
         'contaminants': {
             'idxs': [
-                0, 0, 0, 0, 0,
+                0, 0, 0, 0,
                 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0,
                 0, 1, 2, 3, 0
@@ -90,7 +94,7 @@ class CirrusDataset(Dataset):
         },
         'basic': {
             'idxs': [
-                0, 2, 2, 2, 2,
+                2, 2, 2, 2,
                 1, 1, 1, 1, 0,
                 0, 0, 0, 0, 0,
                 0, 3, 3, 3, 0
@@ -101,7 +105,7 @@ class CirrusDataset(Dataset):
         },
         'streamstails': {
             'idxs': [
-                0, 0, 0, 1, 2,
+                0, 0, 1, 2,
                 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0
@@ -112,7 +116,7 @@ class CirrusDataset(Dataset):
         },
         'all': {
             'idxs': [
-                0, 5, 0, 3, 4,
+                5, 0, 3, 4,
                 1, 0, 6, 0, 2,
                 0, 0, 0, 0, 0,
                 0, 9, 7, 8, 0
@@ -121,16 +125,49 @@ class CirrusDataset(Dataset):
                 'None', 'Main galaxy', 'Halo', 'Tidal tails', 'Streams', 'Shells', 'Companion', 'Ghosted halo', 'Cirrus', 'High background'
             ]
         },
+        'cirrus': {
+            'idxs': [
+                0, 0, 0, 0,
+                0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0,
+                0, 0, 0, 1, 0
+            ],
+            'classes': [
+                'None', 'Cirrus'
+            ]
+        },
     }
 
-    def __init__(self, survey_dir, mask_dir, indices=None, num_classes=1,
+    consensus_methods = [
+        {'aggregate': 'intersection', 'blur': 5},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 5},
+        {'aggregate': 'weighted_avg', 'blur': 5},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+        {'aggregate': 'intersection', 'blur': 5},
+        {'aggregate': 'use_user', 'blur': 0, 'user': 4},
+        {'aggregate': 'weighted_avg', 'blur': 0},
+    ]
+
+    def __init__(self, survey_dir, mask_dir, indices=None, num_classes=None,
                  transform=None, target_transform=None, crop_deg=.5,
                  aug_mult=2, bands='g', repeat_bands=False, padding=0,
                  class_map=None, keep_background=False, classes=None):
         if type(bands) is str:
             bands = [bands]
 
-        self.galaxies, self.cirrus_paths, self.mask_paths = self.load_data(
+        self.galaxies, self.img_paths, self.mask_paths = self.load_data(
             survey_dir,
             mask_dir,
             bands,
@@ -148,11 +185,17 @@ class CirrusDataset(Dataset):
         self.aug_mult = aug_mult
 
         if indices is not None:
-            self.cirrus_paths = [self.cirrus_paths[i] for i in indices]
+            self.img_paths = [self.img_paths[i] for i in indices]
             self.mask_paths = [self.mask_paths[i] for i in indices]
 
         self.padding = padding
         self.keep_background = keep_background
+        self.set_class_map(class_map)
+        if num_classes is not None:
+            self.num_classes = num_classes  # This gets set by set_class_map so need to set manually it has been passed
+
+
+    def set_class_map(self, class_map):
         if type(class_map) is str:
             self.classes = self.class_maps[class_map]['classes']
             if self.keep_background:
@@ -160,14 +203,25 @@ class CirrusDataset(Dataset):
             else:
                 self.num_classes = len(self.classes) - 1
             self.class_map = self.class_maps[class_map]['idxs']
+            self.class_map_key = class_map
+        elif type(class_map) is dict:
+            if 'classes' in class_map:
+                self.classes = class_map['classes']
+            else:
+                self.classes = None
+            self.num_classes = max(class_map['idxs'])
+            self.class_map = class_map
+            self.class_map_key = 'custom'
         else:
             self.classes = None
-            self.num_classes = num_classes
             self.class_map = class_map
+            self.class_map_key = 'custom'
+            self.num_classes = None
+
 
     def __getitem__(self, i):
         i = i // self.aug_mult
-        cirrus = [fits.open(path)[0] for path in self.cirrus_paths[i]]
+        cirrus = [fits.open(path)[0] for path in self.img_paths[i]]
         wcs = WCS(cirrus[0].header, naxis=2)
         mask, centre = self.decode_np_mask(np.load(self.mask_paths[i]))
         # if not (mask.shape[0] == self.num_classes or mask.shape[-1] == self.num_classes):
@@ -208,7 +262,7 @@ class CirrusDataset(Dataset):
         )
 
     def __len__(self):
-        return len(self.cirrus_paths) * self.aug_mult
+        return len(self.img_paths) * self.aug_mult
 
     def crop(self, image, wcs, centre):
         def fit_image(bbox, image_shape):
@@ -234,13 +288,17 @@ class CirrusDataset(Dataset):
             return None
         return self[index * self.aug_mult]
 
-    def plot_galaxy(self, galaxy):
-        fig, ax = plt.subplots(1, len(dataset.classes[1:]) + 1)
-        ax[0].imshow(item[0][0])
-        ax[0].set_title(galaxy)
-        for i, class_ in enumerate(dataset.classes[1:]):
-            ax[i + 1].imshow(item[1][i], vmin=0, vmax=1)
-            ax[i + 1].set_title(class_)
+    def plot_galaxy(self, galaxy, include_mask=True):
+        item = self.get_galaxy(galaxy)
+        mask_channels = len(self.classes[1:]) if include_mask else 0
+        fig, ax = plt.subplots(1, mask_channels + 1, squeeze=False)
+        fig.suptitle(f'class_map={self.class_map_key}')
+        ax[0][0].imshow(item[0][0])
+        ax[0][0].set_title(galaxy)
+        if include_mask:
+            for i, class_ in enumerate(self.classes[1:]):
+                ax[0][i + 1].imshow(item[1][i], vmin=0, vmax=1)
+                ax[0][i + 1].set_title(class_)
         plt.show()
 
     @classmethod
@@ -268,7 +326,7 @@ class CirrusDataset(Dataset):
             array for array in glob.glob(os.path.join(mask_dir, '*.npz'))
         ]
         galaxies = []
-        cirrus_paths = []
+        img_paths = []
         mask_paths = []
         for i, mask_path in enumerate(all_mask_paths):
             mask_args = cls.decode_filename(mask_path)
@@ -288,13 +346,153 @@ class CirrusDataset(Dataset):
                         fits_paths.append(glob.glob(path + '/*.fits')[0])
             if fits_paths:
                 galaxies.append(galaxy)
-                cirrus_paths.append(fits_paths)
+                img_paths.append(fits_paths)
                 mask_paths.append(mask_path)
 
-        return galaxies, cirrus_paths, mask_paths
+        return galaxies, img_paths, mask_paths
 
     @classmethod
-    def get_N(cls, survey_dir, mask_dir, bands, repeat_bands=False):
+    def get_N(cls, survey_dir, mask_dir, bands, repeat_bands=False, **kwargs):
+        galaxies, _, _ = cls.load_data(survey_dir, mask_dir, bands, repeat_bands)
+        return len(galaxies)
+
+    def to_consensus(self, save_dir, survey_save_dir=None, weights={'4': 1, '6': 1, '7': 1, '14': 1}):
+        """Converts multiple annotations of same sample to a single consensus.
+
+        Args:
+            save_dir (str): Where to save the new annotation labels.
+            weights (dict, optional): Weight for each user used to average annotations.
+        """
+        def blur(mask):
+            return np.array(cv2.dilate(mask, (7, 7)))
+
+        def aggregate(masks, method, args):
+            def use_first(masks):
+                any_positive = [np.any(masks[i]) for i, _ in enumerate(masks)]
+                if any(any_positive):
+                    return masks[any_positive.index(True)]
+                else:
+                    return masks[0]
+
+            if method['aggregate'] == 'weighted_avg':
+                out = sum(mask * weights[args[i]['user']] for i, mask in enumerate(masks)) / sum(weights[args[i]['user']] for i, mask in enumerate(masks))
+            elif method['aggregate'] == 'intersection':
+                out = sum(mask for i, mask in enumerate(masks)) > 0
+            elif method['aggregate'] == 'use_first':
+                out = use_first(use_first)
+            elif method['aggregate'] == 'use_user':
+                users = [arg['user'] for arg in args]
+                user_idx = users.index(method['user']) if method['user'] in users else None
+                if user_idx is not None:
+                    out = masks[user_idx]
+                else:
+                    out = use_first(masks)
+            return out
+
+        class_map_key = self.class_map_key
+        class_map = self.class_map
+        self.set_class_map(None)
+
+        for galaxy in set(self.galaxies):
+            print(galaxy)
+            mask_idxs = [i for i, gal in enumerate(self.galaxies) if gal == galaxy]
+            masks = [self[i][1].numpy() for i in mask_idxs]
+            args = [self.decode_filename(self.mask_paths[i]) for i in mask_idxs]
+            consensus = np.zeros_like(masks[0])
+            for class_i in range(masks[0].shape[0]):
+                for i, mask in enumerate(masks):
+                    masks[i][class_i] = blur(mask[class_i]) if self.consensus_methods[class_i]['blur'] > 0 else mask[class_i]
+                consensus[class_i] = aggregate([mask[class_i] for mask in masks], self.consensus_methods[class_i], args)
+            
+            fig, ax = plt.subplots(2, len(masks) + 1, figsize=(12, 6))
+            fig.suptitle(galaxy)
+            for i, mask in enumerate(masks):
+                ax[0][i].imshow(mask[2], vmin=0, vmax=1)
+                ax[1][i].imshow(mask[3], vmin=0, vmax=1)
+                ax[0][i].set_title(f"Tails user={args[i]['user']}")
+                ax[1][i].set_title(f"Streams user={args[i]['user']}")
+            ax[0, -1].imshow(consensus[2], vmin=0, vmax=1)
+            ax[1, -1].imshow(consensus[3], vmin=0, vmax=1)
+            ax[0, -1].set_title('Tails consensus')
+            ax[1, -1].set_title('Streams consensus')
+            fig.savefig(f'streamstails_{galaxy}_consensus')
+            # plt.show()
+
+            consensus = (consensus * 255).astype(np.uint8)
+            if class_map is not None:
+                consensus = combine_classes(consensus, class_map, dtype=torch.uint8)
+            np.save(os.path.join(save_dir, f"name={args[0]['name']}"), consensus)
+            if survey_save_dir:
+                np.save(os.path.join(survey_save_dir, f"name={args[0]['name']}"), self[mask_idxs[0]][0])
+
+        self.set_class_map(class_map_key)
+
+
+class LSBDataset(CirrusDataset):
+    def __init__(self, survey_dir, mask_dir, **kwargs):
+        if kwargs['class_map'] is not None:
+            # survey_dir = os.path.join(survey_dir, kwargs['class_map'])
+            mask_dir = os.path.join(mask_dir, kwargs['class_map'])
+        super().__init__(survey_dir, mask_dir, **kwargs)
+
+    def __getitem__(self, i):
+        i = i // self.aug_mult
+        img = np.load(self.img_paths[i])
+        mask = np.load(self.mask_paths[i])
+
+        # if self.class_map is not None:
+        #     mask = combine_classes(mask, self.class_map, self.keep_background, dtype=torch.float32)
+        mask = mask[:self.num_classes]
+
+        img = img.transpose((1, 2, 0))
+        img = img.astype('float32')
+        mask = mask.transpose((1, 2, 0))
+        mask = mask.astype('float32') / 255
+
+        if self.transform is not None:
+            t = self.transform(image=img, mask=mask)
+            img = t['image']
+            mask = t['mask']
+        img = transforms.ToTensor()(img)
+        mask = transforms.ToTensor()(mask)
+        # albumentations workaround
+        if self.padding > 0:
+            mask = remove_padding(mask, self.padding)
+        return (
+            # img,
+            self.norm_transform(img),
+            mask
+        )
+
+    @classmethod
+    def load_data(cls, survey_dir, mask_dir, bands, *args):
+        all_mask_paths = [
+            array for array in glob.glob(os.path.join(mask_dir, '*.npy'))
+        ]
+        galaxies = []
+        img_paths = []
+        mask_paths = []
+        for i, mask_path in enumerate(all_mask_paths):
+            mask_args = cls.decode_filename(mask_path)
+            galaxy = mask_args['name']
+            gal_path = os.path.join(
+                survey_dir,
+                f'name={galaxy}.npy'
+            )
+            valid_gal_path = os.path.exists(gal_path)
+            if valid_gal_path:
+                valid_gal_shape = len(bands) == np.load(gal_path).shape[0]
+                if valid_gal_shape:
+                    galaxies.append(galaxy) 
+                    img_paths.append(gal_path)
+                    mask_paths.append(mask_path)
+
+        return galaxies, img_paths, mask_paths
+
+    @classmethod
+    def get_N(cls, survey_dir, mask_dir, bands, repeat_bands=False, class_map=None):
+        if class_map is not None:
+            mask_dir = os.path.join(mask_dir, class_map)
         galaxies, _, _ = cls.load_data(survey_dir, mask_dir, bands, repeat_bands)
         return len(galaxies)
 
@@ -360,21 +558,73 @@ def remove_padding(t, p):
     return t[..., p//2:-p//2, p//2:-p//2]
 
 
-def combine_classes(mask, class_map, keep_background=False):
+def combine_classes(mask, class_map, keep_background=False, dtype=torch.int32):
     """Combines classes into groups of classes based on given class map
 
     Args:
         mask (np.array): Input mask.
         class_map (list): The label each class should be mapped to.
+        keep_background (boolean): Not implemented.
+        dtype (np.dtype, optional): dtype of mask. Allows consensus masks to be combined.
     """
     if keep_background:
         raise NotImplementedError("Make background class not(intersection(other_classes)) for CE")
     n_classes = max(class_map)
-    out = torch.zeros((n_classes + 1, *mask.shape[-2:]), dtype=int)
-    class_map = torch.tensor(class_map, dtype=torch.int64)
-    mask = torch.tensor(mask, dtype=int)
-    idxs = class_map.view(-1, 1, 1).expand_as(mask) * mask
-    out.scatter_(0, idxs, mask)
+    out = torch.zeros((n_classes + 1, *mask.shape[-2:]), dtype=dtype)
+    class_map = torch.tensor(class_map, dtype=torch.int32)
+    mask = torch.tensor(mask, dtype=dtype)
+    idxs = class_map.view(-1, 1, 1).expand_as(mask) * (mask > 0).to(torch.int64)
+    scatter_max(mask, idxs, dim=0, out=out)
     if not keep_background:
         out = out[1:]
     return np.array(out)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Converts standard CirrusDataset to LSBDataset.')
+
+    parser.add_argument('--survey_dir',
+                        default='E:/Matlas Data/FITS/matlas', type=str,
+                        help='Path to survey directory. (default: %(default)s)')
+    parser.add_argument('--mask_dir',
+                        default='E:/MATLAS Data/annotations/all0910', type=str,
+                        help='Path to data directory. (default: %(default)s)')
+    parser.add_argument('--survey_save_dir',
+                        default=None,  # 'E:/MATLAS Data/np',
+                        help='Directory to save new survey images to. (default: %(default)s)')
+    parser.add_argument('--mask_save_dir',
+                        default='E:/MATLAS Data/annotations/consensus', type=str,
+                        help='Directory to save new masks to. (default: %(default)s)')
+    parser.add_argument('--class_map',
+                        default=None,
+                        choices=[None, *CirrusDataset.class_maps.keys()],
+                        help='Which class map to use. (default: %(default)s)')
+    parser.add_argument('--bands',
+                        default=['g', 'r'], type=str, nargs='+',
+                        help='Image wavelength band to train on. '
+                             '(default: %(default)s)')
+                             
+    args = parser.parse_args()
+
+    dataset = CirrusDataset(
+        args.survey_dir,
+        args.mask_dir,
+        num_classes=19,
+        aug_mult=1,
+        bands=args.bands,
+        class_map=args.class_map,
+    )
+    if args.class_map is not None:
+        args.mask_save_dir = os.path.join(args.mask_save_dir, args.class_map)
+    dataset.to_consensus(args.mask_save_dir, args.survey_save_dir)
+    
+    
+    dataset = CirrusDataset(
+        "E:/Matlas Data/FITS/matlas",
+        "E:/MATLAS Data/annotations/all0910",
+        num_classes=19,
+        aug_mult=1,
+        bands=['g', 'r'],
+        class_map='cirrus',
+    )
+    dataset.to_consensus("E:/MATLAS Data/annotations/consensus/cirrus")
