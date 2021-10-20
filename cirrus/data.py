@@ -218,7 +218,7 @@ class CirrusDataset(Dataset):
             self.num_classes = len(self.classes) - 1
             self.class_map = self.class_maps[class_map]['idxs']
             self.class_map_key = class_map
-            # self.class_balances = self.class_maps[class_map]['class_balances']
+            self.class_balances = self.class_maps[class_map]['class_balances']
         elif type(class_map) is dict:
             if 'classes' in class_map:
                 self.classes = class_map['classes']
@@ -417,7 +417,7 @@ class CirrusDataset(Dataset):
             'classes': self.classes,
             'num_classes': len(self.classes) - 1,
             'class_balances': [1] * (len(self.classes) - 1),
-            'weights': weights,
+            'user_weights': weights,
         }
         self.set_class_map(None)
 
@@ -467,19 +467,20 @@ class CirrusDataset(Dataset):
 
 
 class LSBDataset(CirrusDataset):
-    def __init__(self, survey_dir, mask_dir, **kwargs):
+    def __init__(self, survey_dir, mask_dir, config_path='info.yml', **kwargs):
         if kwargs['class_map'] is not None:
             # survey_dir = os.path.join(survey_dir, kwargs['class_map'])
             mask_dir = os.path.join(mask_dir, kwargs['class_map'])
         super().__init__(survey_dir, mask_dir, **kwargs)
+        config = self.load_config(os.path.join(mask_dir, config_path))
+        self.class_balances = config['class_balances']
+        self.user_weights = config['user_weights']
 
     def __getitem__(self, i):
         i = i // self.aug_mult
         img = np.load(self.img_paths[i])
         mask = np.load(self.mask_paths[i])
 
-        # if self.class_map is not None:
-        #     mask = combine_classes(mask, self.class_map, self.keep_background, dtype=torch.float32)
         mask = mask[:self.num_classes]
 
         img = img.transpose((1, 2, 0))
@@ -501,6 +502,14 @@ class LSBDataset(CirrusDataset):
             self.norm_transform(img),
             mask
         )
+
+    def load_config(self, config_path):
+        with open(config_path, "r") as stream:
+            try:
+                config = yaml.safe_load(stream)
+            except yaml.YAMLError as exc:
+                print(exc)
+        return config
 
     @classmethod
     def load_data(cls, survey_dir, mask_dir, bands, *args):
