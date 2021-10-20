@@ -644,6 +644,9 @@ if __name__ == "__main__":
                         default=['g', 'r'], type=str, nargs='+',
                         help='Image wavelength band to train on. '
                              '(default: %(default)s)')
+    parser.add_argument('--weights',
+                        default=0, type=int,
+                        help='User weights to use.')
                              
     args = parser.parse_args()
 
@@ -657,6 +660,11 @@ if __name__ == "__main__":
     )
     if args.class_map is not None:
         args.mask_save_dir = os.path.join(args.mask_save_dir, args.class_map)
+
+    weights = [
+        {'4': 1, '6': 1, '7': 1, '14': 1},
+        {'4': 2, '6': 2, '7': 1, '14': 1}
+    ]
     dataset.to_consensus(args.mask_save_dir, args.survey_save_dir)
     
     
