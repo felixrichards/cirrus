@@ -9,6 +9,7 @@ import PIL.Image as Image
 import torch
 import matplotlib.pyplot as plt
 import cv2
+import yaml
 
 from torchvision import transforms
 from torch.utils.data.dataset import Dataset
@@ -90,6 +91,9 @@ class CirrusDataset(Dataset):
             ],
             'classes': [
                 'None', 'High background', 'Ghosted halo', 'Cirrus'
+            ],
+            'class_balances': [
+                1., 1., 1.
             ]
         },
         'basic': {
@@ -101,6 +105,9 @@ class CirrusDataset(Dataset):
             ],
             'classes': [
                 'None', 'Galaxy', 'Fine structures', 'Contaminants'
+            ],
+            'class_balances': [
+                1., 1., 1.
             ]
         },
         'streamstails': {
@@ -112,6 +119,9 @@ class CirrusDataset(Dataset):
             ],
             'classes': [
                 'None', 'Tidal tails', 'Streams'
+            ],
+            'class_balances': [
+                1., 1.
             ]
         },
         'all': {
@@ -123,6 +133,9 @@ class CirrusDataset(Dataset):
             ],
             'classes': [
                 'None', 'Main galaxy', 'Halo', 'Tidal tails', 'Streams', 'Shells', 'Companion', 'Ghosted halo', 'Cirrus', 'High background'
+            ],
+            'class_balances': [
+                1., 1., 1., 1., 1., 1., 1., 1., 1.
             ]
         },
         'cirrus': {
@@ -134,6 +147,9 @@ class CirrusDataset(Dataset):
             ],
             'classes': [
                 'None', 'Cirrus'
+            ],
+            'class_balances': [
+                1.
             ]
         },
     }
@@ -198,22 +214,25 @@ class CirrusDataset(Dataset):
     def set_class_map(self, class_map):
         if type(class_map) is str:
             self.classes = self.class_maps[class_map]['classes']
-            if self.keep_background:
-                self.num_classes = len(self.classes)
-            else:
-                self.num_classes = len(self.classes) - 1
+            self.num_classes = len(self.classes) - 1
             self.class_map = self.class_maps[class_map]['idxs']
             self.class_map_key = class_map
+            # self.class_balances = self.class_maps[class_map]['class_balances']
         elif type(class_map) is dict:
             if 'classes' in class_map:
                 self.classes = class_map['classes']
             else:
                 self.classes = None
             self.num_classes = max(class_map['idxs'])
+            if 'class_balances' in class_map:
+                self.class_balances = class_map['class_balances']
+            else:
+                self.class_balances = [1] * self.num_classes
             self.class_map = class_map
             self.class_map_key = 'custom'
         else:
             self.classes = None
+            self.class_balances = [None] * self.num_classes
             self.class_map = class_map
             self.class_map_key = 'custom'
             self.num_classes = None
@@ -389,8 +408,15 @@ class CirrusDataset(Dataset):
                     out = use_first(masks)
             return out
 
-        class_map_key = self.class_map_key
-        class_map = self.class_map
+        PLOT_TEST = False
+        class_counts = [{'pos': 0, 'neg': 0} for _ in range(self.num_classes)]
+        info = {
+            'class_map_key': self.class_map_key,
+            'class_map': self.class_map.copy(),
+            'classes': self.classes,
+            'num_classes': len(self.classes) - 1,
+            'class_balances': [1] * (len(self.classes) - 1)
+        }
         self.set_class_map(None)
 
         for galaxy in set(self.galaxies):
@@ -404,28 +430,38 @@ class CirrusDataset(Dataset):
                     masks[i][class_i] = blur(mask[class_i]) if self.consensus_methods[class_i]['blur'] > 0 else mask[class_i]
                 consensus[class_i] = aggregate([mask[class_i] for mask in masks], self.consensus_methods[class_i], args)
             
-            fig, ax = plt.subplots(2, len(masks) + 1, figsize=(12, 6))
-            fig.suptitle(galaxy)
-            for i, mask in enumerate(masks):
-                ax[0][i].imshow(mask[2], vmin=0, vmax=1)
-                ax[1][i].imshow(mask[3], vmin=0, vmax=1)
-                ax[0][i].set_title(f"Tails user={args[i]['user']}")
-                ax[1][i].set_title(f"Streams user={args[i]['user']}")
-            ax[0, -1].imshow(consensus[2], vmin=0, vmax=1)
-            ax[1, -1].imshow(consensus[3], vmin=0, vmax=1)
-            ax[0, -1].set_title('Tails consensus')
-            ax[1, -1].set_title('Streams consensus')
-            fig.savefig(f'streamstails_{galaxy}_consensus')
-            # plt.show()
+            if PLOT_TEST:
+                fig, ax = plt.subplots(2, len(masks) + 1, figsize=(12, 6))
+                fig.suptitle(galaxy)
+                for i, mask in enumerate(masks):
+                    ax[0][i].imshow(mask[2], vmin=0, vmax=1)
+                    ax[1][i].imshow(mask[3], vmin=0, vmax=1)
+                    ax[0][i].set_title(f"Tails user={args[i]['user']}")
+                    ax[1][i].set_title(f"Streams user={args[i]['user']}")
+                ax[0, -1].imshow(consensus[2], vmin=0, vmax=1)
+                ax[1, -1].imshow(consensus[3], vmin=0, vmax=1)
+                ax[0, -1].set_title('Tails consensus')
+                ax[1, -1].set_title('Streams consensus')
+                fig.savefig(f'streamstails_{galaxy}_consensus')
+                # plt.show()
 
             consensus = (consensus * 255).astype(np.uint8)
-            if class_map is not None:
-                consensus = combine_classes(consensus, class_map, dtype=torch.uint8)
+            if info['class_map'] is not None:
+                consensus = combine_classes(consensus, info['class_map'], dtype=torch.uint8)
+            for class_i in range(info['num_classes']):
+                class_counts[class_i]['pos'] += np.sum(consensus[class_i] >= 127)
+                class_counts[class_i]['neg'] += np.sum(consensus[class_i] < 127)
             np.save(os.path.join(save_dir, f"name={args[0]['name']}"), consensus)
             if survey_save_dir:
                 np.save(os.path.join(survey_save_dir, f"name={args[0]['name']}"), self[mask_idxs[0]][0])
 
-        self.set_class_map(class_map_key)
+        for class_i in range(info['num_classes']):
+            info['class_balances'][class_i] = float(class_counts[class_i]['neg'] / class_counts[class_i]['pos'])
+        with open(os.path.join(save_dir, 'info.yml'), 'w') as info_file:
+            yaml.dump(info, info_file, default_flow_style=False)
+
+        self.set_class_map(info['class_map_key'])
+        
 
 
 class LSBDataset(CirrusDataset):
@@ -619,12 +655,12 @@ if __name__ == "__main__":
     dataset.to_consensus(args.mask_save_dir, args.survey_save_dir)
     
     
-    dataset = CirrusDataset(
-        "E:/Matlas Data/FITS/matlas",
-        "E:/MATLAS Data/annotations/all0910",
-        num_classes=19,
-        aug_mult=1,
-        bands=['g', 'r'],
-        class_map='cirrus',
-    )
-    dataset.to_consensus("E:/MATLAS Data/annotations/consensus/cirrus")
+    # dataset = CirrusDataset(
+    #     "E:/Matlas Data/FITS/matlas",
+    #     "E:/MATLAS Data/annotations/all0910",
+    #     num_classes=19,
+    #     aug_mult=1,
+    #     bands=['g', 'r'],
+    #     class_map='cirrus',
+    # )
+    # dataset.to_consensus("E:/MATLAS Data/annotations/consensus/cirrus")
