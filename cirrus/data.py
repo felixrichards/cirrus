@@ -1,5 +1,6 @@
 import argparse
 import ast
+import gc
 import glob
 import os
 import warnings
@@ -415,7 +416,8 @@ class CirrusDataset(Dataset):
             'class_map': self.class_map.copy(),
             'classes': self.classes,
             'num_classes': len(self.classes) - 1,
-            'class_balances': [1] * (len(self.classes) - 1)
+            'class_balances': [1] * (len(self.classes) - 1),
+            'weights': weights,
         }
         self.set_class_map(None)
 
@@ -607,10 +609,13 @@ def combine_classes(mask, class_map, keep_background=False, dtype=torch.int32):
         raise NotImplementedError("Make background class not(intersection(other_classes)) for CE")
     n_classes = max(class_map)
     out = torch.zeros((n_classes + 1, *mask.shape[-2:]), dtype=dtype)
-    class_map = torch.tensor(class_map, dtype=torch.int32)
-    mask = torch.tensor(mask, dtype=dtype)
-    idxs = class_map.view(-1, 1, 1).expand_as(mask) * (mask > 0).to(torch.int64)
-    scatter_max(mask, idxs, dim=0, out=out)
+    with torch.no_grad():
+        class_map = torch.tensor(class_map, dtype=torch.int32)
+        mask = torch.tensor(mask, dtype=dtype)
+        idxs = class_map.view(-1, 1, 1).expand_as(mask) * (mask > 0).to(torch.int64)
+        scatter_max(mask, idxs, dim=0, out=out)
+    mask, idxs = None, None
+    gc.collect()
     if not keep_background:
         out = out[1:]
     return np.array(out)
