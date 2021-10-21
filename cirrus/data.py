@@ -674,7 +674,7 @@ if __name__ == "__main__":
         {'4': 1, '6': 1, '7': 1, '14': 1},
         {'4': 2, '6': 2, '7': 1, '14': 1}
     ]
-    dataset.to_consensus(args.mask_save_dir, args.survey_save_dir)
+    dataset.to_consensus(args.mask_save_dir, args.survey_save_dir, weights=weights[args.weights])
     
     
     # dataset = CirrusDataset(
