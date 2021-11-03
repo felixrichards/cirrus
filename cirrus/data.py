@@ -409,6 +409,9 @@ class CirrusDataset(Dataset):
                     out = use_first(masks)
             return out
 
+        if not self.galaxies:
+            raise ValueError("No galaxies in dataset")
+
         PLOT_TEST = False
         class_counts = [{'pos': 0, 'neg': 0} for _ in range(self.num_classes)]
         info = {
@@ -417,6 +420,7 @@ class CirrusDataset(Dataset):
             'classes': self.classes,
             'num_classes': len(self.classes) - 1,
             'class_balances': [1] * (len(self.classes) - 1),
+            'class_counts': [0] * (len(self.classes) - 1),
             'user_weights': weights,
         }
         self.set_class_map(None)
@@ -452,12 +456,13 @@ class CirrusDataset(Dataset):
                 consensus = combine_classes(consensus, info['class_map'], dtype=torch.uint8)
             for class_i in range(info['num_classes']):
                 class_counts[class_i]['pos'] += np.sum(consensus[class_i] >= 127)
-                class_counts[class_i]['neg'] += np.sum(consensus[class_i] < 127)
+                class_counts[class_i]['neg'] += np.sum(consensus[class_i] == 0)
             np.save(os.path.join(save_dir, f"name={args[0]['name']}"), consensus)
             if survey_save_dir:
                 np.save(os.path.join(survey_save_dir, f"name={args[0]['name']}"), self[mask_idxs[0]][0])
 
         for class_i in range(info['num_classes']):
+            info['class_counts'][class_i] = class_counts[class_i]['pos']
             info['class_balances'][class_i] = float(class_counts[class_i]['neg'] / class_counts[class_i]['pos'])
         with open(os.path.join(save_dir, 'info.yml'), 'w') as info_file:
             yaml.dump(info, info_file, default_flow_style=False)
@@ -669,6 +674,7 @@ if __name__ == "__main__":
     )
     if args.class_map is not None:
         args.mask_save_dir = os.path.join(args.mask_save_dir, args.class_map)
+        os.makedirs(args.mask_save_dir, exist_ok=True)
 
     weights = [
         {'4': 1, '6': 1, '7': 1, '14': 1},
