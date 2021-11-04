@@ -4,13 +4,13 @@ import gc
 import glob
 import os
 import warnings
+import yaml
 
+import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 import PIL.Image as Image
 import torch
-import matplotlib.pyplot as plt
-import cv2
-import yaml
 
 from torchvision import transforms
 from torch.utils.data.dataset import Dataset
@@ -106,6 +106,20 @@ class CirrusDataset(Dataset):
             ],
             'classes': [
                 'None', 'Galaxy', 'Fine structures', 'Contaminants'
+            ],
+            'class_balances': [
+                1., 1., 1.
+            ]
+        },
+        'basicshellshalo': {
+            'idxs': [
+                4, 2, 2, 2,
+                1, 1, 1, 1, 3,
+                0, 0, 0, 0, 0,
+                0, 5, 5, 5, 0
+            ],
+            'classes': [
+                'None', 'Galaxy', 'Elongated tidal structures', 'Shells', 'Diffuse Halo', 'Contaminants'
             ],
             'class_balances': [
                 1., 1., 1.
@@ -659,7 +673,7 @@ if __name__ == "__main__":
                         help='Image wavelength band to train on. '
                              '(default: %(default)s)')
     parser.add_argument('--weights',
-                        default=0, type=int,
+                        default='uniform', type=str,
                         help='User weights to use.')
                              
     args = parser.parse_args()
@@ -676,10 +690,10 @@ if __name__ == "__main__":
         args.mask_save_dir = os.path.join(args.mask_save_dir, args.class_map)
         os.makedirs(args.mask_save_dir, exist_ok=True)
 
-    weights = [
-        {'4': 1, '6': 1, '7': 1, '14': 1},
-        {'4': 2, '6': 2, '7': 1, '14': 1}
-    ]
+    weights = {
+        'uniform':  {'4': 1, '6': 1, '7': 1, '14': 1},
+        'double':   {'4': 2, '6': 2, '7': 1, '14': 1}
+    }
     dataset.to_consensus(args.mask_save_dir, args.survey_save_dir, weights=weights[args.weights])
     
     
