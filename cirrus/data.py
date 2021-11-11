@@ -111,7 +111,7 @@ class CirrusDataset(Dataset):
                 1., 1., 1.
             ]
         },
-        'basicshellshalo': {
+        'basicshellshalos': {
             'idxs': [
                 4, 2, 2, 2,
                 1, 1, 1, 1, 3,
@@ -271,29 +271,33 @@ class CirrusDataset(Dataset):
             mask = combine_classes(mask, self.class_map, self.keep_background)
         mask = mask[:self.num_classes]
 
-        # cirrus = cirrus.reshape(cirrus.shape[-2], cirrus.shape[-1], -1)
-        cirrus = cirrus.transpose((1, 2, 0))
-        cirrus = cirrus.astype('float32')
-        # mask = mask.reshape(mask.shape[-2], mask.shape[-1], -1)
-        mask = mask.transpose((1, 2, 0))
-        mask = mask.astype('float32')
+        cirrus = self.to_albu(cirrus)
+        mask = self.to_albu(mask)
 
-        if self.transform is not None:
-            t = self.transform(image=cirrus, mask=mask)
-            cirrus = t['image']
-            mask = t['mask']
         if cirrus.shape[-1] < len(self.bands):
             cirrus = cirrus.repeat(2, 2)
-        cirrus = transforms.ToTensor()(cirrus)
-        mask = transforms.ToTensor()(mask)
-        # albumentations workaround
-        if self.padding > 0:
-            mask = remove_padding(mask, self.padding)
+        cirrus, mask = self.handle_transforms(cirrus, mask)
         return (
             # cirrus,
             self.norm_transform(cirrus),
             mask
         )
+
+    def handle_transforms(self, image, mask):
+        if self.transform is not None:
+            t = self.transform(image=image, mask=mask)
+            image = t['image']
+            mask = t['mask']
+        image = transforms.ToTensor()(image)
+        mask = transforms.ToTensor()(mask)
+        # albumentations workaround
+        if self.padding > 0:
+            mask = remove_padding(mask, self.padding)
+        return image, mask
+
+    @classmethod
+    def to_albu(cls, t):
+        return t.transpose((1, 2, 0)).astype('float32')
 
     def __len__(self):
         return len(self.img_paths) * self.aug_mult
@@ -476,13 +480,12 @@ class CirrusDataset(Dataset):
                 np.save(os.path.join(survey_save_dir, f"name={args[0]['name']}"), self[mask_idxs[0]][0])
 
         for class_i in range(info['num_classes']):
-            info['class_counts'][class_i] = class_counts[class_i]['pos']
+            info['class_counts'][class_i] = int(class_counts[class_i]['pos'])
             info['class_balances'][class_i] = float(class_counts[class_i]['neg'] / class_counts[class_i]['pos'])
         with open(os.path.join(save_dir, 'info.yml'), 'w') as info_file:
             yaml.dump(info, info_file, default_flow_style=False)
 
         self.set_class_map(info['class_map_key'])
-        
 
 
 class LSBDataset(CirrusDataset):
@@ -502,20 +505,10 @@ class LSBDataset(CirrusDataset):
 
         mask = mask[:self.num_classes]
 
-        img = img.transpose((1, 2, 0))
-        img = img.astype('float32')
-        mask = mask.transpose((1, 2, 0))
-        mask = mask.astype('float32') / 255
+        img = self.to_albu(img)
+        mask = self.to_albu(mask) / 255
 
-        if self.transform is not None:
-            t = self.transform(image=img, mask=mask)
-            img = t['image']
-            mask = t['mask']
-        img = transforms.ToTensor()(img)
-        mask = transforms.ToTensor()(mask)
-        # albumentations workaround
-        if self.padding > 0:
-            mask = remove_padding(mask, self.padding)
+        img, mask = self.handle_transforms(img, mask)
         return (
             # img,
             self.norm_transform(img),
@@ -674,6 +667,7 @@ if __name__ == "__main__":
                              '(default: %(default)s)')
     parser.add_argument('--weights',
                         default='uniform', type=str,
+                        choices=['uniform', 'double'],
                         help='User weights to use.')
                              
     args = parser.parse_args()
@@ -686,6 +680,7 @@ if __name__ == "__main__":
         bands=args.bands,
         class_map=args.class_map,
     )
+    args.mask_save_dir = os.path.join(args.mask_save_dir, args.weights)
     if args.class_map is not None:
         args.mask_save_dir = os.path.join(args.mask_save_dir, args.class_map)
         os.makedirs(args.mask_save_dir, exist_ok=True)
@@ -695,14 +690,3 @@ if __name__ == "__main__":
         'double':   {'4': 2, '6': 2, '7': 1, '14': 1}
     }
     dataset.to_consensus(args.mask_save_dir, args.survey_save_dir, weights=weights[args.weights])
-    
-    
-    # dataset = CirrusDataset(
-    #     "E:/Matlas Data/FITS/matlas",
-    #     "E:/MATLAS Data/annotations/all0910",
-    #     num_classes=19,
-    #     aug_mult=1,
-    #     bands=['g', 'r'],
-    #     class_map='cirrus',
-    # )
-    # dataset.to_consensus("E:/MATLAS Data/annotations/consensus/cirrus")
