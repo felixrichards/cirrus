@@ -38,7 +38,7 @@ class CirrusDataset(Dataset):
     Dataset class for Cirrus data.
 
     Args:
-        survey_dir (str): Path to survey directory.
+        survey_dir (str or list of str): Path to survey directory.
         mask_dir (str): Path to mask directory.
         indices (array-like, optional): Indices of total dataset to use.
             Defaults to None.
@@ -282,7 +282,7 @@ class CirrusDataset(Dataset):
 
     def __init__(self, survey_dir, mask_dir, indices=None, num_classes=None,
                  transform=None, target_transform=None, crop_deg=.5,
-                 aug_mult=2, bands='g', repeat_bands=False, padding=0,
+                 aug_mult=1, bands='g', repeat_bands=False, padding=0,
                  class_map=None, keep_background=False, classes=None):
         if type(bands) is str:
             bands = [bands]
@@ -472,14 +472,16 @@ class CirrusDataset(Dataset):
         galaxies = []
         img_paths = []
         mask_paths = []
+        if type(survey_dir) is str:
+            survey_dir = [survey_dir]
         for i, mask_path in enumerate(all_mask_paths):
             mask_args = cls.decode_filename(mask_path)
             galaxy = mask_args['name']
             fits_dirs = [os.path.join(
-                survey_dir,
+                s_dir,
                 galaxy,
                 band
-            ) for band in bands]
+            ) for band in bands for s_dir in survey_dir]
             valid_fits_paths = [os.path.isdir(path) for path in fits_dirs]
             fits_paths = []
             if all(valid_fits_paths):
@@ -599,7 +601,6 @@ class LSBDataset(CirrusDataset):
         if user_weights is not None:
             mask_dir = os.path.join(mask_dir, user_weights)
         if kwargs['class_map'] is not None:
-            # survey_dir = os.path.join(survey_dir, kwargs['class_map'])
             mask_dir = os.path.join(mask_dir, kwargs['class_map'])
             del kwargs['class_map']
         config = self.load_config(os.path.join(mask_dir, config_path))
@@ -617,8 +618,7 @@ class LSBDataset(CirrusDataset):
 
         img, mask = self.handle_transforms(img, mask)
         return (
-            # img,
-            self.norm_transform(img),
+            img,
             mask
         )
 
@@ -753,8 +753,7 @@ class LSBInstanceDataset(LSBDataset):
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
 
         return (
-            # img,
-            self.norm_transform(img),
+            img,
             {
                 'boxes': boxes,
                 'labels': labels,
@@ -903,7 +902,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Converts standard CirrusDataset to LSBDataset.')
 
     parser.add_argument('--survey_dir',
-                        default='E:/Matlas Data/FITS/matlas', type=str,
+                        default='E:/Matlas Data/FITS/matlas', type=str, nargs='+',
                         help='Path to survey directory. (default: %(default)s)')
     parser.add_argument('--mask_dir',
                         default='E:/MATLAS Data/annotations/all0910', type=str,
