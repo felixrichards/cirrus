@@ -17,6 +17,7 @@ from torch.utils.data.dataset import Dataset
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.utils.exceptions import AstropyWarning
+from scipy import ndimage
 from torch_scatter import scatter_max
 
 warnings.simplefilter('ignore', category=AstropyWarning)
@@ -95,7 +96,16 @@ class CirrusDataset(Dataset):
             ],
             'class_balances': [
                 1., 1., 1.
-            ]
+            ],
+            'split_components': [
+                False, True, False
+            ],
+            'segment': [
+                True, False, True
+            ],
+            'detect': [
+                False, True, False
+            ],
         },
         'basic': {
             'idxs': [
@@ -109,21 +119,85 @@ class CirrusDataset(Dataset):
             ],
             'class_balances': [
                 1., 1., 1.
-            ]
+            ],
+            'split_components': [
+                True, True, False
+            ],
+            'segment': [
+                True, True, True
+            ],
+            'detect': [
+                True, True, False
+            ],
+        },
+        'basicshells': {
+            'idxs': [
+                4, 2, 2, 2,
+                1, 1, 1, 1, 3,
+                0, 0, 0, 0, 0,
+                0, 5, 0, 5, 0
+            ],
+            'classes': [
+                'None', 'Galaxy', 'Elongated tidal structures', 'Diffuse halo', 'Shells', 'Contaminants'
+            ],
+            'class_balances': [
+                1., 1., 1., 1., 1.
+            ],
+            'split_components': [
+                True, True, True, False, False 
+            ],
+            'segment': [
+                True, True, True, False, True
+            ],
+            'detect': [
+                True, True, True, True, False
+            ],
         },
         'basicshellshalos': {
             'idxs': [
                 4, 2, 2, 2,
                 1, 1, 1, 1, 3,
                 0, 0, 0, 0, 0,
-                0, 5, 5, 5, 0
+                0, 5, 6, 5, 0
             ],
             'classes': [
-                'None', 'Galaxy', 'Elongated tidal structures', 'Shells', 'Diffuse Halo', 'Contaminants'
+                'None', 'Galaxy', 'Elongated tidal structures', 'Diffuse halo', 'Shells', 'Contaminants', 'Ghosted halo'
             ],
             'class_balances': [
-                1., 1., 1.
-            ]
+                1., 1., 1., 1., 1., 1.
+            ],
+            'split_components': [
+                True, True, True, False, False, True
+            ],
+            'segment': [
+                True, True, True, False, True, False
+            ],
+            'detect': [
+                True, True, True, True, False, True
+            ],
+        },
+        'basicshellsnocontaminants': {
+            'idxs': [
+                4, 2, 2, 2,
+                1, 1, 1, 1, 3,
+                0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0
+            ],
+            'classes': [
+                'None', 'Galaxy', 'Elongated tidal structures', 'Diffuse halo', 'Shells',
+            ],
+            'class_balances': [
+                1., 1., 1., 1.
+            ],
+            'split_components': [
+                True, True, True, False,
+            ],
+            'segment': [
+                True, True, True, False,
+            ],
+            'detect': [
+                True, True, True, True,
+            ],
         },
         'streamstails': {
             'idxs': [
@@ -137,7 +211,16 @@ class CirrusDataset(Dataset):
             ],
             'class_balances': [
                 1., 1.
-            ]
+            ],
+            'split_components': [
+                True, True
+            ],
+            'segment': [
+                True, True
+            ],
+            'detect': [
+                True, True
+            ],
         },
         'all': {
             'idxs': [
@@ -151,6 +234,9 @@ class CirrusDataset(Dataset):
             ],
             'class_balances': [
                 1., 1., 1., 1., 1., 1., 1., 1., 1.
+            ],
+            'split_components': [
+                True, True, True, True, False, True, True, False, False
             ]
         },
         'cirrus': {
@@ -165,6 +251,9 @@ class CirrusDataset(Dataset):
             ],
             'class_balances': [
                 1.
+            ],
+            'split_components': [
+                False
             ]
         },
     }
@@ -233,23 +322,40 @@ class CirrusDataset(Dataset):
             self.class_map = self.class_maps[class_map]['idxs']
             self.class_map_key = class_map
             self.class_balances = self.class_maps[class_map]['class_balances']
+            self.segment_classes = self.class_maps[class_map]['segment']
+            self.detect_classes = self.class_maps[class_map]['detect']
         elif type(class_map) is dict:
+            self.class_map = class_map['class_map']
+            self.num_classes = max(class_map['class_map'])
             if 'classes' in class_map:
                 self.classes = class_map['classes']
             else:
                 self.classes = None
-            self.num_classes = max(class_map['idxs'])
             if 'class_balances' in class_map:
                 self.class_balances = class_map['class_balances']
             else:
                 self.class_balances = [1] * self.num_classes
-            self.class_map = class_map
-            self.class_map_key = 'custom'
+            if 'class_map_key' in class_map:
+                self.class_map_key = class_map['class_map_key']
+            else:
+                self.class_map_key = 'custom'
+            if 'segment' in class_map:
+                self.segment_classes = class_map['segment']
+            else:
+                self.segment_classes = [True] * self.num_classes
+            if 'detect' in class_map:
+                self.detect_classes = class_map['detect']
+            else:
+                self.detect_classes = [True] * self.num_classes
+            if 'user_weights' in class_map:
+                self.user_weights = class_map['user_weights']
         else:
             self.classes = None
-            self.class_balances = [None] * self.num_classes
             self.class_map = class_map
             self.class_map_key = 'custom'
+            self.class_balances = [None] * self.num_classes
+            self.segment_classes = [None] * self.num_classes
+            self.detect_classes = [None] * self.num_classes
             self.num_classes = None
 
 
@@ -489,14 +595,15 @@ class CirrusDataset(Dataset):
 
 
 class LSBDataset(CirrusDataset):
-    def __init__(self, survey_dir, mask_dir, config_path='info.yml', **kwargs):
+    def __init__(self, survey_dir, mask_dir, config_path='info.yml', user_weights='double', **kwargs):
+        if user_weights is not None:
+            mask_dir = os.path.join(mask_dir, user_weights)
         if kwargs['class_map'] is not None:
             # survey_dir = os.path.join(survey_dir, kwargs['class_map'])
             mask_dir = os.path.join(mask_dir, kwargs['class_map'])
-        super().__init__(survey_dir, mask_dir, **kwargs)
+            del kwargs['class_map']
         config = self.load_config(os.path.join(mask_dir, config_path))
-        self.class_balances = config['class_balances']
-        self.user_weights = config['user_weights']
+        super().__init__(survey_dir, mask_dir, class_map=config, **kwargs)
 
     def __getitem__(self, i):
         i = i // self.aug_mult
@@ -549,11 +656,161 @@ class LSBDataset(CirrusDataset):
         return galaxies, img_paths, mask_paths
 
     @classmethod
-    def get_N(cls, survey_dir, mask_dir, bands, repeat_bands=False, class_map=None):
+    def get_N(cls, survey_dir, mask_dir, bands, repeat_bands=False, class_map=None, weights='double'):
+        if weights is not None:
+            mask_dir = os.path.join(mask_dir, weights)
         if class_map is not None:
             mask_dir = os.path.join(mask_dir, class_map)
         galaxies, _, _ = cls.load_data(survey_dir, mask_dir, bands, repeat_bands)
         return len(galaxies)
+
+    def to_instance(self, save_dir, split_components):
+        assert len(split_components) == len(self.classes) - 1
+
+        PLOT = False
+
+        info = {
+            'class_map_key': self.class_map_key,
+            'class_map': self.class_map.copy(),
+            'classes': self.classes,
+            'num_classes': len(self.classes) - 1,
+            'class_balances': [1] * (len(self.classes) - 1),
+            'user_weights': self.user_weights,
+            'num_instances': {lbl: 0 for lbl in self.classes[1:]},
+            'split_components': split_components,
+            'segment': self.segment_classes,
+            'detect': self.detect_classes,
+        }
+        # loop through items
+        for i in range(len(self)):
+            print(f'On galaxy {i}/{len(self)}')
+            args = self.decode_filename(self.mask_paths[i])
+            # loop through classes
+            for j, class_label in enumerate(self.classes[1:]):
+                print(f'Class {j}/{len(self.classes[1:])} - {self.classes[j + 1]}')
+                labels = (self[i][1][j] > .5).numpy()
+                # check if class should be divided into instances
+                if np.any(labels):
+                    if split_components[j]:
+                        # identify connected components
+                        labels, num_instances = ndimage.label(labels)
+                        # split array into component per channel
+                        labels = np.array([labels == l for l in np.arange(num_instances) + 1]).astype('bool')
+                        del_rows = [val < 10 for val in np.sum(labels, axis=(1, 2))]
+                        if np.any(del_rows):
+                            labels = np.delete(labels, del_rows, 0)
+                            num_instances -= np.sum(del_rows)
+                    else:
+                        num_instances = 1
+                        labels = labels[None, :, :]
+
+                    info['num_instances'][class_label] += int(num_instances)
+                    
+                    if PLOT:
+                        fig, axs = plt.subplots(1, num_instances + 1, squeeze=False)
+                        fig.suptitle(self.classes[j + 1])
+                        axs[0][0].imshow((self[i][1][j] > .5).numpy(), vmin=0, vmax=1)
+                        for k in range(num_instances):
+                            axs[0][k+1].imshow(labels[k], vmin=0, vmax=1)
+                        plt.show()
+                    
+                    # save class channel as array
+                    np.savez(
+                        os.path.join(save_dir, f"name={args['name']}-class={class_label}"),
+                        shape=labels.shape,
+                        centre=None,
+                        mask=np.packbits(labels)
+                    )
+
+        with open(os.path.join(save_dir, 'info.yml'), 'w') as info_file:
+            yaml.dump(info, info_file, default_flow_style=False)
+        
+
+class LSBInstanceDataset(LSBDataset):
+    def __init__(self, survey_dir, mask_dir, config_path='info.yml', **kwargs):
+        super().__init__(survey_dir, mask_dir, **kwargs)
+
+    def __getitem__(self, i):
+        i = i // self.aug_mult
+        img = np.load(self.img_paths[i])
+        masks = []
+        labels = []
+        for class_key, mask_path in self.mask_paths[i].items():
+            mask = self.decode_np_mask(np.load(mask_path, allow_pickle=True))[0]
+            masks.append(mask)
+            labels += [self.classes.index(class_key)] * mask.shape[0]
+            print(class_key, mask.shape, labels)
+        masks = np.concatenate(masks, axis=0)
+        labels = torch.tensor(labels)
+
+        img = self.to_albu(img)
+        masks = self.to_albu(masks)
+
+        img, masks = self.handle_transforms(img, masks)
+
+        # hopefully masks.shape = [N,H,W] - confirm
+        boxes = self.bounding_boxes(masks, labels)
+        area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+
+        return (
+            # img,
+            self.norm_transform(img),
+            {
+                'boxes': boxes,
+                'labels': labels,
+                'masks': masks,
+                'area': area,
+                'image_id': torch.tensor([i]),
+            }
+        )
+
+    @classmethod
+    def bound_object(cls, mask):
+        pos = np.where(mask)
+        xmin = np.min(pos[1])
+        xmax = np.max(pos[1])
+        ymin = np.min(pos[0])
+        ymax = np.max(pos[0])
+        return [xmin, ymin, xmax, ymax]
+
+    def bounding_boxes(self, masks, labels):
+        num_objs, H, W = masks.shape
+        boxes = []
+        for i in range(num_objs):
+            if self.detect_classes[labels[i] - 1]:
+                boxes.append(self.bound_object(masks[i]))
+            else:
+                boxes.append([0, 0, H, W])
+        return torch.tensor(boxes, dtype=torch.float32)
+
+    @classmethod
+    def load_data(cls, survey_dir, mask_dir, bands, *args):
+        all_mask_paths = sorted([
+            array for array in glob.glob(os.path.join(mask_dir, '*.npz'))
+        ])
+        galaxies = []
+        img_paths = []
+        mask_paths = {}
+        for i, mask_path in enumerate(all_mask_paths):
+            mask_args = cls.decode_filename(mask_path)
+            galaxy = mask_args['name']
+            gal_path = os.path.join(
+                survey_dir,
+                f'name={galaxy}.npy'
+            )
+            valid_gal_path = os.path.exists(gal_path)
+            if valid_gal_path:
+                valid_gal_shape = len(bands) == np.load(gal_path).shape[0]
+                if valid_gal_shape:
+                    if galaxy not in galaxies:
+                        galaxies.append(galaxy)
+                        img_paths.append(gal_path)
+                        mask_paths[galaxy] = {}
+                    mask_paths[galaxy][mask_args['class']] = mask_path
+
+        mask_paths = [mask_paths[galaxy] for galaxy in galaxies]
+
+        return galaxies, img_paths, mask_paths
 
 
 class SynthCirrusDataset(Dataset):
@@ -665,6 +922,10 @@ if __name__ == "__main__":
                         default=['g', 'r'], type=str, nargs='+',
                         help='Image wavelength band to train on. '
                              '(default: %(default)s)')
+    parser.add_argument('--conversion',
+                        default='consensus',
+                        choices=['consensus', 'instance'],
+                        help='Which dataset conversion to perform. (default: %(default)s)')
     parser.add_argument('--weights',
                         default='uniform', type=str,
                         choices=['uniform', 'double'],
@@ -672,21 +933,34 @@ if __name__ == "__main__":
                              
     args = parser.parse_args()
 
-    dataset = CirrusDataset(
-        args.survey_dir,
-        args.mask_dir,
-        num_classes=19,
-        aug_mult=1,
-        bands=args.bands,
-        class_map=args.class_map,
-    )
     args.mask_save_dir = os.path.join(args.mask_save_dir, args.weights)
     if args.class_map is not None:
         args.mask_save_dir = os.path.join(args.mask_save_dir, args.class_map)
         os.makedirs(args.mask_save_dir, exist_ok=True)
 
-    weights = {
-        'uniform':  {'4': 1, '6': 1, '7': 1, '14': 1},
-        'double':   {'4': 2, '6': 2, '7': 1, '14': 1}
-    }
-    dataset.to_consensus(args.mask_save_dir, args.survey_save_dir, weights=weights[args.weights])
+    if args.conversion == 'consensus':
+        dataset = CirrusDataset(
+            args.survey_dir,
+            args.mask_dir,
+            num_classes=19,
+            aug_mult=1,
+            bands=args.bands,
+            class_map=args.class_map,
+        )
+
+        weights = {
+            'uniform':  {'4': 1, '6': 1, '7': 1, '14': 1},
+            'double':   {'4': 2, '6': 2, '7': 1, '14': 1}
+        }
+        dataset.to_consensus(args.mask_save_dir, args.survey_save_dir, weights=weights[args.weights])
+    else:
+        dataset = LSBDataset(
+            args.survey_dir,
+            args.mask_dir,
+            aug_mult=1,
+            bands=args.bands,
+            class_map=args.class_map,
+            user_weights='double',
+        )
+        split_components = LSBDataset.class_maps[args.class_map]['split_components']
+        dataset.to_instance(args.mask_save_dir, split_components)
