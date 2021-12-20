@@ -1,5 +1,10 @@
+import sys
 import torch
 import torch.nn as nn
+
+
+def get_scale(key):
+    return getattr(sys.modules[__name__], f'Scale{key}')
 
 
 class ScaleBase(nn.Module):
@@ -27,7 +32,7 @@ class ScaleBase(nn.Module):
         return scale(x, self.a1, self.b1, self.a2, self.b2)
 
 
-class Scale(ScaleBase):
+class ScaleMultiple(ScaleBase):
     """Applies multiple arcsinh scaling operations with learned parameters
 
     Args:
