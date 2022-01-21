@@ -3,6 +3,7 @@ import os
 import yaml
 
 import cirrus
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -27,6 +28,7 @@ from quicktorch.modules.attention.loss import (
 )
 from quicktorch.modules.attention.models import AttModel
 from quicktorch.modules.attention.metrics import DAFMetric
+from igcn.seg.attention.attention import get_gabor_attention_head
 
 
 datasets = {
@@ -37,12 +39,12 @@ datasets = {
     },
     'lsb': {
         'class': LSBDataset,
-        'images': "E:/MATLAS Data/np",
+        'images': "E:/MATLAS Data/np_surveys/05",
         'annotations': "E:/MATLAS Data/annotations/consensus",
     },
     'instance': {
         'class': LSBInstanceDataset,
-        'images': "E:/MATLAS Data/np",
+        'images': "E:/MATLAS Data/np_surveys/05",
         'annotations': "E:/MATLAS Data/annotations/instance",
     },
 }
@@ -78,12 +80,28 @@ def get_transform(transforms):
 
 
 # Some gross patching to prevent albumentations clipping image
-def apply(self, img, gauss=None, **params):
+def gauss_apply(self, img, gauss=None, **params):
     img = img.astype("float32")
     return img + gauss
 
+# More gross patching to force albumentations to take entire image if cropsize > imagesize
+def random_crop(img: np.ndarray, crop_height: int, crop_width: int, h_start: float, w_start: float):
+    height, width = img.shape[:2]
+    if height < crop_height:
+        crop_height = height
+    if width < crop_width:
+        crop_width = width
+    x1, y1, x2, y2 = albumentations.augmentations.crops.functional.get_random_crop_coords(height, width, crop_height, crop_width, h_start, w_start)
+    img = img[y1:y2, x1:x2]
+    return img
 
-albumentations.GaussNoise.apply = apply
+
+def crop_apply(self, img, h_start=0, w_start=0, **params):
+    return random_crop(img, self.height, self.width, h_start, w_start)
+
+
+albumentations.GaussNoise.apply = gauss_apply
+albumentations.RandomCrop.apply = crop_apply
 
 TRANSFORMS = {
     'crop': albumentations.RandomCrop,
@@ -181,8 +199,23 @@ def get_scale(scale_key, n_channels):
     return scale, n_scaling
 
 
-def create_attention_model(n_channels, n_classes, model_config, pad_to_remove=0):
+def create_attention_model(n_channels, n_classes, model_config, pad_to_remove=0, pretrain_path=None):
+    def load_pretrained(model, pretrain_path, backbone_key, n_scaling):
+        scal_keys = {
+            'MS': 'backbone.features.layer0.0.weight',
+            'ResNet': 'backbone.features.layer0.0.weight',
+        }
+        if not pretrain_path:
+            return
+        state_dict = torch.load(pretrain_path)['model_state_dict']
+        weight = state_dict[scal_keys[backbone_key]]
+        state_dict[scal_keys[backbone_key]] = weight.repeat(1, 2 * n_scaling, 1, 1)
+        model.load_state_dict(state_dict, strict=False)
+
     scale, n_scaling = get_scale(model_config['scale_key'], n_channels)
+    if 'gabor' in model_config:
+        if model_config['gabor'] and type(model_config['attention_head']) is str:
+            model_config['attention_head'] = get_gabor_attention_head(model_config['attention_head'])
     model = AttModel(
         n_channels=n_channels * n_scaling,
         n_classes=n_classes,
@@ -190,4 +223,5 @@ def create_attention_model(n_channels, n_classes, model_config, pad_to_remove=0)
         pad_to_remove=pad_to_remove,
         **model_config
     )
+    load_pretrained(model, pretrain_path, model_config['backbone'], n_scaling)
     return model
