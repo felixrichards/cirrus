@@ -7,11 +7,10 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import ast
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from igcn.seg.models import UNetIGCNCmplx
 from igcn.utils import _pair
-from run_cirrus import create_model
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from run_cirrus import create_model
 from data import CirrusDataset
 
 
