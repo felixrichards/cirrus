@@ -285,17 +285,18 @@ def create_png_copies(dataset, save_dir, galaxy, labels, scale=None):
             True
         )
 
-    for i, label in enumerate(labels):
-        save_array_png(
-            target[i].numpy(),
-            os.path.join(save_dir, 'copies/labels', f'{galaxy}-annotation-{label}.png')
-        )
+    if labels is not None:
+        for i, label in enumerate(labels):
+            save_array_png(
+                target[i].numpy(),
+                os.path.join(save_dir, 'copies/labels', f'{galaxy}-annotation-{label}.png')
+            )
 
 
 def main():
     parser = argparse.ArgumentParser(description='Handles Cirrus segmentation tasks.')
     parser.add_argument('--survey_dir',
-                        default='D:/MATLAS Data/FITS/matlas_reprocessed', type=str,
+                        default='E:/MATLAS Data/FITS/matlas', type=str,
                         help='Path to survey directory. (default: %(default)s)')
     parser.add_argument('--mask_dir',
                         default='../data/cirrus', type=str,
@@ -333,26 +334,34 @@ def main():
     args = parser.parse_args()
 
     # path = r"C:\Users\Felix\Documents\igcn\models\seg\cirrus\SFCT-cirrus_bands=['g', 'r']-pre=True-kernel_size=3-no_g=1-base_channels=8-downscale=2_epoch139.pk"
-    path = args.model_path
 
-    params = parse_filename(os.path.split(args.model_path)[-1])
+    if args.model_path is not None:
+        path = args.model_path
+        params = parse_filename(os.path.split(args.model_path)[-1])
+
+        model = create_model(
+            'models/cirrus/seg',
+            n_channels=len(params['bands']),
+            n_classes=args.n_classes,
+            model_path=path,
+            pretrain=False,
+            **params
+        )
+    else:
+        model = None
+        params = {'bands': ['g', 'r'], 'downscale': 1}
+
+    downscale = params['downscale']
     bands = params['bands']
     dataset = CirrusDataset(args.survey_dir, args.mask_dir, bands=bands)
-    labels = ('cirrus',)
-
-    model = create_model(
-        'models/cirrus/seg',
-        n_channels=len(params['bands']),
-        n_classes=args.n_classes,
-        model_path=path,
-        pretrain=False,
-        **params
-    )
-    downscale = params['downscale']
+    labels = None
 
     if args.copies:
         if args.scale:
-            scale = model.preprocess.scale
+            if model is not None:
+                scale = model.preprocess.scale
+            else:
+                scale = Scale(2, n_scaling=1)
         else:
             scale = None
         create_png_copies(dataset, args.save_dir, args.galaxy, labels, scale=scale)#model.preprocess)
