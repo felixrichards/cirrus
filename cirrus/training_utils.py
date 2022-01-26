@@ -202,8 +202,8 @@ def get_scale(scale_key, n_channels):
 def create_attention_model(n_channels, n_classes, model_config, pad_to_remove=0, pretrain_path=None):
     def load_pretrained(model, pretrain_path, backbone_key, n_scaling):
         scal_keys = {
-            'MS': 'backbone.features.layer0.0.weight',
-            'ResNet': 'backbone.features.layer0.0.weight',
+            'Standard': 'features.layer0.0.weight',
+            'ResNet': 'features.layer0.0.weight',
         }
         if not pretrain_path:
             return
