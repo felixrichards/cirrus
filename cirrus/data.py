@@ -684,15 +684,20 @@ class CirrusDataset(Dataset):
             for class_i in range(masks[0].shape[0]):
                 for i, mask in enumerate(masks):
                     masks[i][class_i] = blur(mask[class_i]) if list(self.consensus_methods.values())[class_i]['blur'] > 0 else mask[class_i]
-                consensus[class_i] = 255 * aggregate([mask[class_i] for mask in masks], list(self.consensus_methods.values())[class_i], args)
+                if info['classes'][info['class_map'][class_i]] in self.consensus_methods.keys():
+                    method_idx = list(self.consensus_methods.keys()).index(info['classes'][info['class_map'][class_i]])
+                else:
+                    method_idx = class_i
+                consensus[class_i] = 255 * aggregate([mask[class_i] for mask in masks], list(self.consensus_methods.values())[method_idx], args)
 
             if PLOT_TEST:
                 if np.any(masks):
-                    fig, ax = plt.subplots(1, 2, figsize=(12, 6), squeeze=False)
-                    ax[0, -1].imshow(consensus[0], vmin=0, vmax=1)
+                    fig, ax = plt.subplots(1, len(masks) + 1, figsize=(12, 6), squeeze=False)
+                    ax[0, -1].imshow(consensus[0], vmin=0, vmax=255)
                     ax[0, -1].set_title('Cirrus consensus')
-                    ax[0, -2].imshow(self[mask_idxs[0]][0][1].numpy())
-                    ax[0, -2].set_title(galaxy)
+                    for i, mask in enumerate(masks):
+                        ax[0, i].imshow(mask[0])
+                        ax[0, i].set_title(galaxy)
 
                     # fig, ax = plt.subplots(1, len(masks) + 2, figsize=(12, 6), squeeze=False)
                     # fig.suptitle(galaxy)
