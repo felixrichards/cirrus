@@ -120,12 +120,17 @@ def lsb_datasets(class_map, dataset='instance'):
     dataset = construct_dataset(dataset=dataset, class_map=class_map)
     N = len(dataset)
     test_p = .85
-    val_p = .7
+    val_p = .85
     indices = torch.randperm(int(N * test_p)).tolist()
     test_indices = torch.arange(int(N * test_p), N).tolist()
 
     # define transform
-    transform = get_transform(['flip', 'rotate', 'noise'])
+    transform = {
+        'flip': None,
+        'rotate': None,
+        'noise': {'var_limit': .1, 'p': .8},
+        'contrast': {'limit': 0.02}
+    }
 
     # get datasets
     dataset_train = construct_dataset(idxs=indices[:int(N * val_p)], class_map=class_map, transform=transform, aug_mult=4)
@@ -203,7 +208,7 @@ def create_attention_model(n_channels, n_classes, model_config, pad_to_remove=0,
     def load_pretrained(model, pretrain_path, backbone_key, n_scaling):
         scal_keys = {
             'Standard': 'features.layer0.0.weight',
-            'ResNet': 'features.layer0.0.weight',
+            'ResNet50': 'features.layer0.0.weight',
         }
         if not pretrain_path:
             return
