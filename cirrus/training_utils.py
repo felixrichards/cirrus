@@ -2,7 +2,7 @@ import albumentations
 import os
 import yaml
 
-import cirrus
+import cirrus.scale
 import numpy as np
 import torch
 import torch.nn as nn
