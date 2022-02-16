@@ -102,6 +102,7 @@ def crop_apply(self, img, h_start=0, w_start=0, **params):
 
 albumentations.GaussNoise.apply = gauss_apply
 albumentations.RandomCrop.apply = crop_apply
+albumentations.CenterCrop.apply = crop_apply
 
 TRANSFORMS = {
     'crop': albumentations.RandomCrop,
@@ -111,7 +112,8 @@ TRANSFORMS = {
     'rotate': albumentations.RandomRotate90,
     'noise': albumentations.GaussNoise,
     'affine': albumentations.Affine,
-    'contrast': albumentations.RandomContrast
+    'contrast': albumentations.RandomContrast,
+    'center_crop': albumentations.CenterCrop,
 }
 
 
