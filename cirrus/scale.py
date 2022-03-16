@@ -2,6 +2,8 @@ import sys
 import torch
 import torch.nn as nn
 
+from collections import OrderedDict
+
 
 def get_scale(key):
     return getattr(sys.modules[__name__], f'Scale{key}')
@@ -22,14 +24,32 @@ class ScaleBase(nn.Module):
             'b2': 0.4387783408164978,
         }
     }
+    band_order = ['g', 'r']
 
-    def __init__(self, n_channels, method='arcsinh'):
+    def __init__(self, n_channels, method='arcsinh', init_values=None, band_order=None):
         super().__init__()
         self.n_channels = n_channels
-        self.band_order = ['g', 'r']
+        if init_values is not None:
+            self.band_order = self._validate_band_order(band_order, init_values)
+            self.init_values = self._validate_init_values(init_values, n_channels)
 
     def scale(self, x):
         return scale(x, self.a1, self.b1, self.a2, self.b2)
+
+    @classmethod
+    def _validate_band_order(cls, band_order, init_values):
+        if band_order is None and isinstance(init_values, OrderedDict):
+            band_order = init_values.keys()
+        assert band_order is not None and init_values is not None, "init_values and band_order cannot both be None, unless init_values is an OrderedDict"
+        return band_order
+
+    @classmethod
+    def _validate_init_values(cls, init_values, n_channels):
+        assert type(init_values) is dict, "init_values must be dict"
+        assert len(init_values) >= n_channels, "n_channels must be larger than the number of init_values"
+        assert all([len(band.values()) == 4 for band in init_values.values()])
+        return init_values
+
 
 
 class ScaleMultiple(ScaleBase):
@@ -39,8 +59,8 @@ class ScaleMultiple(ScaleBase):
         n_channels (int): Number of different scaling channels to learn.
         method (str, optional): What scaling operation to use - not implemented.
     """
-    def __init__(self, n_channels, n_scaling=4, method='arcsinh'):
-        super().__init__(n_channels, method)
+    def __init__(self, n_channels, n_scaling=4, method='arcsinh', init_values=None, band_order=None):
+        super().__init__(n_channels, method, init_values, band_order)
         self.n_scaling = n_scaling
         self.a1 = nn.Parameter(data=torch.Tensor(1, self.n_scaling, n_channels, 1, 1))
         self.b1 = nn.Parameter(data=torch.Tensor(1, self.n_scaling, n_channels, 1, 1))
@@ -71,8 +91,8 @@ class ScaleParallel(ScaleBase):
         n_channels (int): Number of different scaling channels to learn.
         method (str, optional): What scaling operation to use - not implemented.
     """
-    def __init__(self, n_channels, method='arcsinh', **kwargs):
-        super().__init__(n_channels, method)
+    def __init__(self, n_channels, method='arcsinh', init_values=None, band_order=None, **kwargs):
+        super().__init__(n_channels, method, init_values, band_order)
         self.n_scaling = 2
         self.a1 = nn.Parameter(data=torch.Tensor(1, n_channels, 1, 1))
         self.b1 = nn.Parameter(data=torch.Tensor(1, n_channels, 1, 1))
