@@ -12,12 +12,15 @@ import matplotlib.patches as patches
 import numpy as np
 import PIL.Image as Image
 import torch
+import torch.nn.functional as F
+import matplotlib.patheffects as PathEffects
 
 from torchvision import transforms
 from torch.utils.data.dataset import Dataset
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.utils.exceptions import AstropyWarning
+from astropy. visualization import make_lupton_rgb
 from scipy import ndimage
 from torch_scatter import scatter_max
 
@@ -52,85 +55,15 @@ class CirrusDataset(Dataset):
     """
 
     means = {
-        # processed cirrus+HB
-        # 'g': .354,
-        # 'r': .404,
-        # processed cirrus
-        # 'g': .254,
-        # 'r': .301,
-        # 'i': .246,
-        # 'gr': .276,
-        # reprocessed cirrus
-        # 'g': 0.288,
-        # 'r': 0.207,
-        # processed cirrus+HB
         'g': .265,
         'r': .313,
     }
     stds = {
-        # processed cirrus+HB
-        # 'g': .759,
-        # 'r': .924,
-        # processed cirrus
-        # 'g': .741,
-        # 'r': .903,
-        # 'i': 1.063,
-        # 'gr': .744,
-        # reprocessed cirrus
-        # 'g': 0.712,
-        # 'r': 0.795,
-        # processed cirrus+HB
         'g': .753,
         'r': .918,
     }
 
     class_maps = {
-        'contaminants': {
-            'idxs': [
-                0, 0, 0, 0,
-                0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0,
-                0, 1, 2, 3, 0
-            ],
-            'classes': [
-                'None', 'High background', 'Ghosted halo', 'Cirrus'
-            ],
-            'class_balances': [
-                1., 1., 1.
-            ],
-            'split_components': [
-                False, True, False
-            ],
-            'segment': [
-                True, False, True
-            ],
-            'detect': [
-                False, True, False
-            ],
-        },
-        'basicold': {
-            'idxs': [
-                2, 2, 2, 2,
-                1, 1, 1, 1, 0,
-                0, 0, 0, 0, 0,
-                0, 3, 3, 3, 0
-            ],
-            'classes': [
-                'None', 'Galaxy', 'Fine structures', 'Contaminants'
-            ],
-            'class_balances': [
-                1., 1., 1.
-            ],
-            'split_components': [
-                True, False, False
-            ],
-            'segment': [
-                True, True, True
-            ],
-            'detect': [
-                True, True, False
-            ],
-        },
         'basic': {
             'idxs': [
                 2, 2, 2, 2,
@@ -145,7 +78,16 @@ class CirrusDataset(Dataset):
                 1., 1., 1.
             ],
             'split_components': [
-                True, False, True, False
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': True, 'blur': 199, 'prune': True},
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': False, 'prune': True}
+            ],
+            'aggregate_methods': [
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
             ],
             'segment': [
                 True, True, True
@@ -168,7 +110,14 @@ class CirrusDataset(Dataset):
                 1., 1., 1.
             ],
             'split_components': [
-                True, False, True
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': True, 'blur': 199, 'prune': True},
+                {'split': True, 'blur': 0, 'prune': True},
+            ],
+            'aggregate_methods': [
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
+                {'method': 'nms', 'threshold': .3},
             ],
             'segment': [
                 True, True, True
@@ -180,7 +129,7 @@ class CirrusDataset(Dataset):
         'basicnocontaminantsnocompanions': {
             'idxs': [
                 0, 2, 2, 2,
-                1, 0, 0, 0, 3,
+                1, 0, 3, 0, 3,
                 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0
             ],
@@ -191,7 +140,14 @@ class CirrusDataset(Dataset):
                 1., 1., 1.
             ],
             'split_components': [
-                True, False, True
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': True, 'blur': 199, 'prune': True},
+                {'split': True, 'blur': 0, 'prune': True},
+            ],
+            'aggregate_methods': [
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
+                {'method': 'nms', 'threshold': .3},
             ],
             'segment': [
                 True, True, True
@@ -203,7 +159,7 @@ class CirrusDataset(Dataset):
         'basiccirrusnocompanions': {
             'idxs': [
                 0, 2, 2, 2,
-                1, 0, 0, 0, 3,
+                1, 0, 3, 0, 3,
                 0, 0, 0, 0, 0,
                 0, 0, 0, 4, 0
             ],
@@ -214,7 +170,16 @@ class CirrusDataset(Dataset):
                 1., 1., 1., 1.
             ],
             'split_components': [
-                True, False, True, False
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': True, 'blur': 199, 'prune': True},
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': False, 'prune': True},
+            ],
+            'aggregate_methods': [
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
             ],
             'segment': [
                 True, True, True, True
@@ -223,73 +188,70 @@ class CirrusDataset(Dataset):
                 True, True, True, False
             ],
         },
-        'basicshells': {
+        'basichalosnocompanions': {
             'idxs': [
-                4, 2, 2, 2,
-                1, 1, 1, 1, 3,
+                0, 2, 2, 2,
+                1, 0, 3, 0, 3,
                 0, 0, 0, 0, 0,
-                0, 5, 0, 5, 0
+                0, 0, 4, 0, 0
             ],
             'classes': [
-                'None', 'Galaxy', 'Elongated tidal structures', 'Diffuse halo', 'Shells', 'Contaminants'
-            ],
-            'class_balances': [
-                1., 1., 1., 1., 1.
-            ],
-            'split_components': [
-                True, False, True, False, False
-            ],
-            'segment': [
-                True, True, True, False, True
-            ],
-            'detect': [
-                True, True, True, True, False
-            ],
-        },
-        'basicshellshalos': {
-            'idxs': [
-                4, 2, 2, 2,
-                1, 1, 1, 1, 3,
-                0, 0, 0, 0, 0,
-                0, 5, 6, 5, 0
-            ],
-            'classes': [
-                'None', 'Galaxy', 'Elongated tidal structures', 'Diffuse halo', 'Shells', 'Contaminants', 'Ghosted halo'
-            ],
-            'class_balances': [
-                1., 1., 1., 1., 1., 1.
-            ],
-            'split_components': [
-                True, False, True, False, False, True
-            ],
-            'segment': [
-                True, True, True, False, True, False
-            ],
-            'detect': [
-                True, True, True, True, False, True
-            ],
-        },
-        'basicshellsnocontaminants': {
-            'idxs': [
-                4, 2, 2, 2,
-                1, 1, 1, 1, 3,
-                0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0
-            ],
-            'classes': [
-                'None', 'Galaxy', 'Elongated tidal structures', 'Diffuse halo', 'Shells',
+                'None', 'Galaxy', 'Elongated tidal structures', 'Diffuse halo', 'Ghosted halo'
             ],
             'class_balances': [
                 1., 1., 1., 1.
             ],
             'split_components': [
-                True, False, True, False,
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': True, 'blur': 199, 'prune': True},
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': True, 'blur': 0, 'prune': True}
+            ],
+            'aggregate_methods': [
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
             ],
             'segment': [
-                True, True, True, False,
+                True, True, True, True
             ],
             'detect': [
-                True, True, True, True,
+                True, True, True, True
+            ],
+        },
+        'basichaloscirrusnocompanions': {
+            'idxs': [
+                0, 2, 2, 2,
+                1, 0, 3, 0, 3,
+                0, 0, 0, 0, 0,
+                0, 0, 4, 5, 0
+            ],
+            'classes': [
+                'None', 'Galaxy', 'Elongated tidal structures', 'Diffuse halo', 'Ghosted halo', 'Cirrus'
+            ],
+            'class_balances': [
+                1., 1., 1., 1., 1.
+            ],
+            'split_components': [
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': True, 'blur': 199, 'prune': True},
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': True, 'blur': 0, 'prune': True},
+                {'split': False, 'prune': True},
+            ],
+            'aggregate_methods': [
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
+                {'method': 'nms', 'threshold': .3},
+                {'method': 'union'},
+                {'method': 'union'},
+            ],
+            'segment': [
+                True, True, True, True, True
+            ],
+            'detect': [
+                True, True, True, True, False
             ],
         },
         'streamstails': {
@@ -306,7 +268,12 @@ class CirrusDataset(Dataset):
                 1., 1.
             ],
             'split_components': [
-                True, True
+                {'split': True, 'blur': 199, 'prune': True},
+                {'split': True, 'blur': 199, 'prune': True},
+            ],
+            'aggregate_methods': [
+                {'method': 'union'},
+                {'method': 'union'},
             ],
             'segment': [
                 True, True
@@ -359,15 +326,15 @@ class CirrusDataset(Dataset):
     }
 
     consensus_methods = {
-        'Shells': {'aggregate': 'intersection', 'blur': 5},
+        'Shells': {'aggregate': 'union', 'blur': 5},
         'Plumes': {'aggregate': 'weighted_avg', 'blur': 0},
         'Tidal Tails': {'aggregate': 'weighted_avg', 'blur': 5},
         'Streams': {'aggregate': 'weighted_avg', 'blur': 5},
-        'Main Galaxy': {'aggregate': 'weighted_avg', 'blur': 0},
-        'Dwarf Galaxy': {'aggregate': 'weighted_avg', 'blur': 0},
-        'Companion Galaxy': {'aggregate': 'weighted_avg', 'blur': 0},
+        'Main Galaxy': {'aggregate': 'union', 'blur': 0},
+        'Dwarf Galaxy': {'aggregate': 'union', 'blur': 0},
+        'Companion Galaxy': {'aggregate': 'union', 'blur': 0},
         'Background Galaxy of Interest': {'aggregate': 'weighted_avg', 'blur': 0},
-        'Halo': {'aggregate': 'weighted_avg', 'blur': 0},
+        'Halo': {'aggregate': 'use_user', 'blur': 0, 'user': 4},
         'Bar': {'aggregate': 'weighted_avg', 'blur': 0},
         'Ring': {'aggregate': 'weighted_avg', 'blur': 0},
         'Spiral Arm': {'aggregate': 'weighted_avg', 'blur': 0},
@@ -375,7 +342,7 @@ class CirrusDataset(Dataset):
         'Instrument': {'aggregate': 'weighted_avg', 'blur': 0},
         'Satellite Trail': {'aggregate': 'weighted_avg', 'blur': 0},
         'High Background': {'aggregate': 'weighted_avg', 'blur': 0},
-        'Ghosted Halo': {'aggregate': 'intersection', 'blur': 5},
+        'Ghosted Halo': {'aggregate': 'union', 'blur': 5},
         # 'Cirrus': {'aggregate': 'use_user', 'blur': 0, 'user': 4},
         'Cirrus': {'aggregate': 'weighted_avg', 'blur': 0},
         'Not Sure': {'aggregate': 'weighted_avg', 'blur': 0},
@@ -510,15 +477,33 @@ class CirrusDataset(Dataset):
     def __len__(self):
         return len(self.img_paths) * self.aug_mult
 
-    def crop(self, image, wcs, centre):
-        def fit_image(bbox, image_shape):
-            # translates bounding box so that it fits inside image
+    def crop(self, image, wcs, centre, offset=None, return_offset=False):
+        """offset (h, w) allows specifying an amount the bbox should be shifted.
+        """
+        def calc_offset(bbox, image_shape):
+            # calculates how much to shift bounding box so that it fits image
             height_offset = max(-bbox[0, 1], 0)
             height_offset = min(image_shape[-2] - bbox[1, 1], height_offset)
             width_offset = max(-bbox[1, 0], bbox[0, 0] - image_shape[-1], 0)
             width_offset = min(image_shape[-1] - bbox[0, 0], width_offset)
-            bbox[:, 1] += height_offset
-            bbox[:, 0] += width_offset
+            return (height_offset, width_offset)
+
+        def expand_image(bbox, image, offset):
+            # expands image (with zeroes) so that bbox fits inside
+            bbox = apply_offset(bbox, offset)
+            image_offset = calc_offset(bbox, image.shape)
+            image = np.pad(
+                image,
+                (
+                    (max(0, image_offset[0]), max(0, -image_offset[0])),
+                    (max(0, image_offset[1]), max(0, -image_offset[1]))
+                )
+            )
+            return image
+
+        def apply_offset(bbox, offset):
+            bbox[:, 1] += offset[0]
+            bbox[:, 0] += offset[1]
             return bbox
 
         bbox = wcs.wcs_world2pix(
@@ -528,12 +513,23 @@ class CirrusDataset(Dataset):
             ],
             0
         ).astype(np.int32)
-        bbox = fit_image(bbox, image.shape)
+
+        if offset is None:
+            # check bbox fits inside image, if not move it
+            offset = calc_offset(bbox, image.shape)
+            bbox = apply_offset(bbox, offset)
+        else:
+            # check image contains bbox, if not make it bigger
+            image = expand_image(bbox, image, offset)
+
         out = image[..., bbox[0, 1]:bbox[1, 1], bbox[1, 0]:bbox[0, 0]]
         if type(out) is np.ndarray:
-            return out.copy()
+            out = out.copy()
         else:
-            return out.clone()
+            out = out.clone()
+        if return_offset:
+            return out, offset
+        return out
 
     def get_galaxy(self, galaxy):
         try:
@@ -543,12 +539,41 @@ class CirrusDataset(Dataset):
             return None
         return self[index * self.aug_mult]
 
-    def plot_galaxy(self, galaxy, include_mask=True):
+    def get_colour_image(self, galaxy, fits_path):
+        def find_fits(band_dir):
+            return glob.glob(os.path.join(band_dir, '*.fits'))[-1]
+
+        path = os.path.join(fits_path, galaxy)
+        path = os.path.normpath(path)
+        band_dirs = glob.glob(os.path.join(path, '*/'))
+        bands = [b.split(os.sep)[-2] for b in band_dirs]
+        if len(band_dirs) < 3:
+            print(f"Cannot make colour image for {galaxy}, {bands=}")
+            return self.get_galaxy(galaxy)[0][-1] # maybe make this return 3 channels
+
+        i_band = 'i' if 'i' in bands else 'gr'
+        print(band_dirs[bands.index('g')], find_fits(band_dirs[bands.index('g')]))
+        g = fits.open(find_fits(band_dirs[bands.index('g')]))[0].data
+        r = fits.open(find_fits(band_dirs[bands.index('r')]))[0].data
+        i = fits.open(find_fits(band_dirs[bands.index(i_band)]))[0].data
+        if 'i' in bands:
+            rgb = make_lupton_rgb(i, r, g, stretch=4, Q=5)
+        else:
+            rgb = make_lupton_rgb(r, g, i, stretch=4, Q=5)
+        print(rgb.shape)
+        return rgb
+
+    def plot_galaxy(self, galaxy, include_mask=True, fits_path=None):
         item = self.get_galaxy(galaxy)
         mask_channels = len(self.classes[1:]) if include_mask else 0
         fig, ax = plt.subplots(1, mask_channels + 1, squeeze=False)
         fig.suptitle(f'class_map={self.class_map_key}')
-        ax[0][0].imshow(self._gal(item)[0])
+        if fits_path is not None:
+            img = self.get_colour_image(galaxy, fits_path)
+        else:
+            img = self._gal(item)[0]
+
+        ax[0][0].imshow(img)
         ax[0][0].set_title(galaxy)
         if include_mask:
             for i, class_ in enumerate(self.classes[1:]):
@@ -641,7 +666,7 @@ class CirrusDataset(Dataset):
 
             if method['aggregate'] == 'weighted_avg':
                 out = np.sum([mask * weights[args[i]['user']] for i, mask in enumerate(masks)], axis=0) / sum(weights[args[i]['user']] for i in range(len(masks)))
-            elif method['aggregate'] == 'intersection':
+            elif method['aggregate'] == 'union':
                 out = np.sum([mask for i, mask in enumerate(masks)], axis=0) > 0
             elif method['aggregate'] == 'use_first':
                 out = use_first(use_first)
@@ -755,6 +780,7 @@ class LSBDataset(CirrusDataset):
         mask = self.to_albu(mask) / 255
 
         img, mask = self.handle_transforms(img, mask)
+
         return (
             img,
             mask
@@ -802,7 +828,6 @@ class LSBDataset(CirrusDataset):
 
     @classmethod
     def bound_object(cls, mask):
-        print(mask.shape, mask.dtype)
         pos = np.where(mask)
         try:
             np.min(pos[1])
@@ -823,7 +848,26 @@ class LSBDataset(CirrusDataset):
         centre[1] = min(centre[1], image.shape[-2] - width // 2)
         return image[..., int(centre[1] - width // 2):int(centre[1] + width // 2), int(centre[0] - width // 2):int(centre[0] + width // 2)]
 
-    def to_instance(self, save_dir, split_components, survey_save_dir=None, gal_coords=None, crop_size=None, fits_dir=None):
+    def to_instance(self, save_dir, split_components, survey_save_dir=None, gal_coords=None, crop_size=None, fits_dir=None, aggregate=None, out_size=None):
+        """Converts a consensus LSB dataset to instance style.
+
+        Each object annotation is saved as its own file.
+
+        Params:
+            save_dir (str)
+            split_components (list of bool): whether masks of a class should be split into separate objects,
+                using a simple connected components analysis.
+            survey_save_dir (str, optional): saves survey images along with masks.
+            gal_coords (dict of tuple, optional): allows combining annotations from nearby galaxies.
+                galaxy names as keys, (ra, dec) as values.
+            crop_size (float, optional): crops a region of deg x deg around centre (with some exceptions, see self.crop).
+                this requires access to a fits header (which should match the images in this dataset) 
+                using the fits_dir argument.
+            fits_dir(str, optional): path to fits headers. dir should be fits_dir/GAL_NAME/BAND/*.fits.
+                not fully implemented.
+            aggregate (float, optional): aggregates objects with either non maximal surpression style comparison, or through union.
+            out_size (int, optional): saves labels as out_size x out_size. Defaults to None.
+        """
         def find_near_gals(gal, gal_coords):
             def measure_distance(a, b):
                 dist = np.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
@@ -832,21 +876,28 @@ class LSBDataset(CirrusDataset):
             close_gals = []
             for other_gal in gal_coords:
                 if other_gal != gal:
-                    if measure_distance(gal_coords[gal], gal_coords[other_gal]) < self.crop_deg:
+                    if measure_distance(gal_coords[gal], gal_coords[other_gal]) < np.sqrt(self.crop_deg ** 2 + self.crop_deg ** 2):
                         close_gals.append(other_gal)
 
             return close_gals
 
         def process_labels(labels):
-            if split_components[j]:
+            if split_components[j]['split']:
+                # blur mask to connect close components
+                blur = split_components[j]['blur']
+                blurred = cv2.dilate(labels.astype(np.float32), np.ones((blur, blur))) if blur > 0 else labels
                 # identify connected components
-                labels, num_instances = ndimage.label(labels)
+                components, num_instances = ndimage.label(blurred)
+                del blurred
+                # trim blurred bits
+                labels = components * labels
                 # split array into component per channel
                 labels = np.array([labels == l for l in np.arange(num_instances) + 1]).astype('bool')
                 del_rows = [val < 10 for val in np.sum(labels, axis=(1, 2))]
                 if np.any(del_rows):
                     labels = np.delete(labels, del_rows, 0)
                     num_instances -= np.sum(del_rows)
+                # prune edge labels??
             else:
                 num_instances = 1
                 labels = labels[None, :, :]
@@ -863,6 +914,49 @@ class LSBDataset(CirrusDataset):
             header = fits.open(os.path.join(fits_dir, galaxy, 'g', f'{galaxy}_scal_g.fits'))[0].header
             wcs = WCS(header, naxis=2)
             return wcs
+
+        def nms(masks, threshold=0.8):
+            """Removes masks which have high overlap with others (NMS)
+
+            Params:
+                masks (list of np.array)
+                threshold (float, optional)
+            """
+            def calculate_iou(a, b):
+                max_v = 255 if np.max([a,  b]) > 1 else 1  # should make it compatible with [0, 1] or [0, 255]
+                a = a > max_v / 2
+                b = b > max_v / 2
+                i = np.sum(np.logical_and(a, b))
+                u = np.sum(np.logical_or(a, b))
+                return i / u
+
+            N = len(masks)
+            ious = np.zeros((N, N))
+            for i in range(N):
+                for j in range(i + 1, N):
+                    ious[i, j] = calculate_iou(masks[i], masks[j])
+
+            overlapping = np.transpose(np.nonzero(ious > threshold))
+            to_remove = []
+            for pair in overlapping:
+                if masks[pair[0]].sum() > masks[pair[1]].sum():
+                    to_remove.append(pair[1])
+                else:
+                    to_remove.append(pair[0])
+
+            masks = [masks[i] for i in range(N) if i not in to_remove]
+            masks = np.array(masks)
+
+            return masks
+
+        def union(masks):
+            """Takes union of given masks
+
+            Params:
+                masks (list of np.array)
+            """
+            max_v = np.max(masks)  # should make it compatible with [0, 1] or [0, 255]
+            return [np.sum(masks, axis=0) > max_v / 2]
 
         assert len(split_components) == len(self.classes) - 1
         self.crop_deg = crop_size
@@ -890,6 +984,10 @@ class LSBDataset(CirrusDataset):
                 wcs = get_wcs(self.galaxies[i])
             if survey_save_dir is not None and crop_size is not None:
                 img = self.crop(self[i][0], wcs, centre)
+                # resize if necessary
+                if out_size is not None:
+                    img = torch.tensor(img).unsqueeze(0)
+                    img = F.interpolate(img, size=(out_size, out_size), mode='bilinear')[0].numpy()
                 np.save(os.path.join(survey_save_dir, f"name={args['name']}"), img)
             # loop through classes
             for j, class_label in enumerate(self.classes[1:]):
@@ -897,7 +995,7 @@ class LSBDataset(CirrusDataset):
                 labels = [(self[i][1][j] > .5).numpy()]
                 # crop labels
                 if crop_size is not None:
-                    labels[0] = self.crop(labels[0], wcs, centre)
+                    labels[0], offset = self.crop(labels[0], wcs, centre, return_offset=True)
 
                 # find nearby galaxies
                 if gal_coords is not None:
@@ -907,7 +1005,7 @@ class LSBDataset(CirrusDataset):
                         # crop labels
                         if crop_size is not None:
                             other_wcs = get_wcs(close_gal)
-                            other_labels = self.crop(other_labels, other_wcs, centre)
+                            other_labels = self.crop(other_labels, other_wcs, centre, offset=offset)
                         if np.any(other_labels):
                             other_labels = cv2.resize(other_labels.astype(float), dsize=labels[0].shape[::-1], interpolation=cv2.INTER_NEAREST).astype(bool)
                             labels.append(other_labels)
@@ -916,25 +1014,39 @@ class LSBDataset(CirrusDataset):
                 num_instances = 0
                 labels = [label for label in labels if np.any(label)]
                 if np.any(labels):
+                    before_labels_shape = np.shape(labels)
+                    if aggregate is not None and len(labels) > 1:
+                        print(f"Attempting to combine by {aggregate[j]}")
+                        if aggregate[j]['method'] == 'nms':
+                            labels = nms(labels, threshold=aggregate[j]['threshold'])
+                        if aggregate[j]['method'] == 'union':
+                            labels = union(labels)
+                        num_instances -= (before_labels_shape[0] - np.shape(labels)[0])
+
                     all_labels = []
                     for label in labels:
                         processed_label, num_i = process_labels(label)
                         all_labels.append(processed_label)
                         num_instances += num_i
-                    # labels = np.array([process_labels(l) for l in labels])
-                    labels = np.array(all_labels)
-                    del(all_labels)
-                    labels = labels.reshape(labels.shape[0] * labels.shape[1], *labels.shape[2:])
 
-                    info['num_instances'][class_label] += int(num_instances)
+                    labels = np.concatenate(all_labels, axis=0)
+                    del(all_labels)
+                    
+                    info['num_instances'][class_label] += int(labels.shape[0])
 
                     if PLOT:
-                        fig, axs = plt.subplots(1, num_instances + 1, squeeze=False)
+                        fig, axs = plt.subplots(1, labels.shape[0] + 1, squeeze=False)
                         fig.suptitle(self.classes[j + 1])
-                        axs[0][0].imshow((self[i][1][j] > .5).numpy(), vmin=0, vmax=1)
-                        for k in range(num_instances):
+                        axs[0][0].imshow(self.crop(self[i][1][j] > .5, wcs, centre).numpy(), vmin=0, vmax=1)
+                        for k in range(labels.shape[0]):
                             axs[0][k+1].imshow(labels[k], vmin=0, vmax=1)
                         plt.show()
+
+                    # resize labels if necessary
+                    if out_size is not None:
+                        labels = torch.tensor(labels.astype(np.uint8)).unsqueeze(0)
+                        labels = F.interpolate(labels, size=(out_size, out_size))[0].numpy()
+                        labels = labels.astype(bool)
 
                     # save class channel as array
                     np.savez(
@@ -950,7 +1062,7 @@ class LSBDataset(CirrusDataset):
 
 class LSBInstanceDataset(LSBDataset):
     def __init__(self, survey_dir, mask_dir, config_path='info.yml', **kwargs):
-        super().__init__(survey_dir, mask_dir, **kwargs)
+        super().__init__(survey_dir, mask_dir, config_path='info.yml', **kwargs)
 
     def __getitem__(self, i):
         i = i // self.aug_mult
@@ -961,11 +1073,11 @@ class LSBInstanceDataset(LSBDataset):
         labels = []
         for class_key, mask_path in self.mask_paths[i].items():
             mask = self.decode_np_mask(np.load(mask_path, allow_pickle=True))[0]
+            mask = mask[np.count_nonzero(mask, axis=(1, 2)) > 0]
             masks.append(mask)
             labels += [self.classes.index(class_key)] * mask.shape[0]
         masks = np.concatenate(masks, axis=0)
         labels = torch.tensor(labels)
-        num_objs = labels.shape[0]
 
         img = self.to_albu(img)
         masks = self.to_albu(masks)
@@ -977,33 +1089,26 @@ class LSBInstanceDataset(LSBDataset):
         boxes = self.bounding_boxes(masks, labels)
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
 
+        # remove bad labels
+        masks, boxes, labels, area = masks[area != 0], boxes[area != 0], labels[area != 0], area[area != 0]
+        num_objs = labels.shape[0]
+
         # this is just to stop things breaking - has no significance
         iscrowd = torch.zeros((num_objs,), dtype=torch.int64)
 
+        out = {
+            'boxes': boxes,
+            'labels': labels,
+            'masks': masks,
+            'area': area,
+            'image_id': torch.tensor([i]),
+            'iscrowd': iscrowd,
+        }
+
         return (
             img,
-            {
-                'boxes': boxes,
-                'labels': labels,
-                'masks': masks,
-                'area': area,
-                'image_id': torch.tensor([i]),
-                'iscrowd': iscrowd,
-            }
+            out
         )
-
-    # def handle_transforms(self, image, mask, boxes):
-    #     if self.transform is not None:
-    #         t = self.transform(image=image, mask=mask, bboxes=boxes)
-    #         image = t['image']
-    #         mask = t['mask']
-    #         boxes = t['bboxes']
-    #     image = transforms.ToTensor()(image)
-    #     mask = transforms.ToTensor()(mask)
-    #     # albumentations workaround
-    #     if self.padding > 0:
-    #         mask = remove_padding(mask, self.padding)
-    #     return image, mask, boxes
 
     def bounding_boxes(self, masks, labels):
         num_objs, H, W = masks.shape
@@ -1013,6 +1118,7 @@ class LSBInstanceDataset(LSBDataset):
                 boxes.append(self.bound_object(masks[i]))
             else:
                 boxes.append([0, 0, H, W])
+
         return torch.tensor(boxes, dtype=torch.float32)
 
     @classmethod
@@ -1043,30 +1149,92 @@ class LSBInstanceDataset(LSBDataset):
 
         return galaxies, img_paths, mask_paths
 
-    def plot_galaxy(self, galaxy, include_mask=True):
+    def plot_galaxy(self, galaxy, include_mask=True, save_fig=None, fits_path=None):
         item = self.get_galaxy(galaxy)
-        gal = self._gal(item)
+        if fits_path is None:
+            gal = self._gal(item)[0]
+        else:
+            gal = self.get_colour_image(galaxy, fits_path)
         target = item[1]
-        mask_channels = len(target['labels']) if include_mask else 0
-        fig, ax = plt.subplots(1, mask_channels + 1, squeeze=False, figsize=(18,10))
+        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         fig.suptitle(f'class_map={self.class_map_key}')
-        ax[0][0].imshow(gal[0])
-        ax[0][0].set_title(galaxy)
+        ax.imshow(gal)
+        ax.set_title(galaxy)
+
         if include_mask:
-            for i, class_ in enumerate(target['labels']):
-                ax[0][i + 1].imshow(self._mask(item)[i], vmin=0, vmax=1)
-                ax[0][i + 1].set_title(self.classes[class_])
-                x, y, x1, y1 = target['boxes'][i]
-                box = patches.Rectangle(
-                    (x, y),
-                    (x1 - x),
-                    (y1 - y),
-                    linewidth=1,
-                    edgecolor='r',
-                    facecolor='none'
-                )
-                ax[0][i + 1].add_patch(box)
-        plt.show()
+            target['labels'], indices = torch.sort(target['labels'], dim=0)
+            target['masks'] = target['masks'][indices]
+            target['boxes'] = target['boxes'][indices]
+            self.plot_instance_labels(
+                ax,
+                target['masks'],
+                target['labels'],
+                target['boxes'],
+                self.classes,
+            )
+        if save_fig:
+            os.makedirs(save_fig, exist_ok=True)
+            plt.savefig(os.path.join(save_fig, f'{galaxy}_instance.png'))
+        else:
+            plt.show()
+        plt.close('all')
+
+    @classmethod
+    def plot_instance_labels(cls, ax, masks, labels, boxes, classes, preds=None):
+
+        alpha = .5
+        colors = [
+            None,
+            (.835, .169, 0., alpha),
+            (0., .447, .698, alpha),
+            (0., .620, .451, alpha),
+            (.337, .706, .914, alpha),
+            (.902, .624, 0., alpha)
+        ]
+
+        for i, class_ in enumerate(labels):
+            mask = masks[i].numpy().astype('float32')
+            mask[mask < 0.5] = np.nan
+            mask[mask >= 0.5] = 1.
+            contour = (mask >= 1).astype('uint8') * 255
+            contour, _ = cv2.findContours(contour, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_NONE)
+            mask_to_plot = mask[:, :, None] * np.full((*mask.shape, 4), colors[class_])
+            contour_colour = np.array(list(colors[class_])) * 255
+            contour_colour[3] = .9
+            cv2.drawContours(mask_to_plot, contour, contourIdx=-1, color=contour_colour, thickness=3)
+            del mask
+            ax.imshow(mask_to_plot, vmin=0, vmax=1)
+            del mask_to_plot
+            x, y, x1, y1 = boxes[i]
+            box = patches.Rectangle(
+                (x, y),
+                (x1 - x),
+                (y1 - y),
+                linewidth=2,
+                edgecolor=colors[class_][:3],
+                facecolor='none'
+            )
+            if 'Cirrus' not in classes[class_]:
+                ax.add_patch(box)
+            if preds is not None:
+                text_x = x + 5 + (2 if preds[i].item() < .995 else 0)
+                text = f'{preds[i].item():.2f}'
+            else:
+                text_x = x + 5
+                text = f'{classes[class_]}'
+            txt = ax.text(
+                text_x,
+                y1 + 17,
+                text,
+                color='black',
+                weight='roman',
+                fontsize=12,
+                bbox={
+                    'facecolor': colors[class_], 'edgecolor': colors[class_]
+                }
+            )
+            txt.set_path_effects([PathEffects.withStroke(linewidth=2, foreground='w')])
+        ax.invert_yaxis()
 
     @classmethod
     def _mask(cls, item):
@@ -1203,6 +1371,9 @@ if __name__ == "__main__":
     parser.add_argument('--crop_deg',
                         default=.5, type=float,
                         help='Crops a region of crop_deg x crop_deg surrounding the target galaxy.')
+    parser.add_argument('--out_size',
+                        default=None, type=int,
+                        help='Desired resolution of new dataset.')
 
     args = parser.parse_args()
 
@@ -1282,9 +1453,21 @@ if __name__ == "__main__":
             bands=args.bands,
             class_map=args.class_map,
             user_weights='double',
+            # indices=[5, 6, 7, 8, 9, 10, 11]
+            # indices=[18, 19]
         )
         split_components = LSBDataset.class_maps[args.class_map]['split_components']
+        aggregate_methods = LSBDataset.class_maps[args.class_map]['aggregate_methods']
 
         gal_coords = dataset.load_config(args.gal_coords_path)
         gal_coords = {gal: val for gal, val in gal_coords.items() if gal in dataset.galaxies}
-        dataset.to_instance(args.mask_save_dir, split_components, survey_save_dir=args.survey_save_dir, crop_size=args.crop_deg, gal_coords=gal_coords, fits_dir=args.fits_combine_path)
+        dataset.to_instance(
+            args.mask_save_dir,
+            split_components,
+            survey_save_dir=args.survey_save_dir,
+            crop_size=args.crop_deg,
+            gal_coords=gal_coords,
+            fits_dir=args.fits_combine_path,
+            aggregate=aggregate_methods,
+            out_size=args.out_size
+        )
