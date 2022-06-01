@@ -33,9 +33,14 @@ from igcn.seg.attention.attention import get_gabor_attention_head
 
 datasets = {
     'cirrus': {
-        'class': CirrusDataset,
-        'images': "E:/MATLAS Data/FITS/matlas",
-        'annotations': "E:/MATLAS Data/cirrus_annotations",
+        'class': LSBDataset,
+        'images': "E:/MATLAS Data/np_surveys/05",
+        'annotations': "E:/MATLAS Data/annotations/consensus",
+    },
+    'cirrus_only': {
+        'class': LSBDataset,
+        'images': "E:/MATLAS Data/np_surveys/05",
+        'annotations': "E:/MATLAS Data/annotations/consensus_cirrus_only",
     },
     'lsb': {
         'class': LSBDataset,
@@ -44,19 +49,21 @@ datasets = {
     },
     'instance': {
         'class': LSBInstanceDataset,
-        'images': "E:/MATLAS Data/np_surveys/05",
-        'annotations': "E:/MATLAS Data/annotations/instance",
+        'images': "E:/MATLAS Data/np_surveys/05_1024",
+        'annotations': "E:/MATLAS Data/annotations/instance_combined",
     },
 }
 
 
-def construct_dataset(dataset='instance', transform=None, idxs=None, bands=['g', 'r'], class_map='basicshells', aug_mult=1, padding=0):
+def construct_dataset(dataset='instance', transform=None, idxs=None, bands=['g', 'r'], class_map='basicshells', aug_mult=1, padding=0, ann_path=None):
     Dataset = datasets[dataset]['class']
     if transform is not None:
         transform = get_transform(transform)
+    if ann_path is None:
+        ann_path = datasets[dataset]['annotations']
     return Dataset(
         datasets[dataset]['images'],
-        datasets[dataset]['annotations'],
+        ann_path,
         bands=bands,
         class_map=class_map,
         indices=idxs,
@@ -82,6 +89,7 @@ def get_transform(transforms):
 # Some gross patching to prevent albumentations clipping image
 def gauss_apply(self, img, gauss=None, **params):
     img = img.astype("float32")
+    # print((img+gauss).min(), (img+gauss).max(), (img).min(), (img).max())
     return img + gauss
 
 # More gross patching to force albumentations to take entire image if cropsize > imagesize
@@ -100,6 +108,21 @@ def crop_apply(self, img, h_start=0, w_start=0, **params):
     return random_crop(img, self.height, self.width, h_start, w_start)
 
 
+def contrast_apply(self, img, alpha=1.0, beta=0.0, **params):
+    img = img.astype("float32")
+
+    if alpha != 1:
+        img *= alpha
+    if beta != 0:
+        if self.beta_by_max:
+            max_value = 1.
+            img += beta * max_value
+        else:
+            img += beta * np.mean(img)
+    return img
+
+
+albumentations.RandomContrast.apply = contrast_apply
 albumentations.GaussNoise.apply = gauss_apply
 albumentations.RandomCrop.apply = crop_apply
 albumentations.CenterCrop.apply = crop_apply
@@ -128,6 +151,7 @@ def lsb_datasets(class_map, dataset='instance'):
 
     # define transform
     transform = {
+        'resize': [1024, 1024],
         'flip': None,
         'rotate': None,
         'noise': {'var_limit': .1, 'p': .8},
@@ -137,7 +161,7 @@ def lsb_datasets(class_map, dataset='instance'):
     # get datasets
     dataset_train = construct_dataset(idxs=indices[:int(N * val_p)], class_map=class_map, transform=transform, aug_mult=4)
     dataset_val = construct_dataset(idxs=indices[int(N * val_p):int(N * test_p)], class_map=class_map, transform=transform)
-    dataset_test = construct_dataset(idxs=test_indices, class_map=class_map)
+    dataset_test = construct_dataset(idxs=test_indices, class_map=class_map, transform={'resize': [1024, 1024]})
 
     return dataset_train, dataset_val, dataset_test
 
@@ -161,7 +185,7 @@ def load_config(config_path, default_config_path=None, default=False):
 
 def get_loss(seg_loss, consensus_loss, aux_loss=None, pos_weight=torch.tensor(1)):
     seg_loss = seg_losses[seg_loss](reduction='none', pos_weight=pos_weight)
-    consensus_loss = consensus_losses[consensus_loss](seg_criterion=seg_loss)
+    consensus_loss = consensus_losses[consensus_loss](beta=2., seg_criterion=seg_loss)
     if aux_loss is None:
         return consensus_loss
 
